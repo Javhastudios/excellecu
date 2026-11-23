@@ -30,6 +30,8 @@ AudioProcessorValueTreeState::ParameterLayout createLayout()
                                                          StringArray { "512", "1024", "4096", "8192" }, 2));
     p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ids::overlap, 1 }, "Overlap",
                                                          StringArray { "25%", "50%", "75%" }, 1));
+    p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ids::engine, 1 }, "Motor",
+                                                         StringArray { "Exacto", u8 ("Clásico") }, 0));
 
     const StringArray types { "Campana", "Low shelf", "High shelf", "High pass", "Low pass" };
     const StringArray modes { u8 ("Estéreo"), "L", "R", "M", "S" };
@@ -85,6 +87,7 @@ ExcellecuProcessor::ExcellecuProcessor()
     }
     winPtr = apvts.getRawParameterValue (ids::winSize);
     ovPtr = apvts.getRawParameterValue (ids::overlap);
+    enginePtr = apvts.getRawParameterValue (ids::engine);
 
     engine.setParams (currentParams());
     setLatencySamples (engine.latency());
@@ -117,6 +120,7 @@ eq::Params ExcellecuProcessor::currentParams() const
     }
     p.n = eq::N_OPTIONS[(size_t) idx (winPtr, 4)];
     p.overlap = eq::OV_OPTIONS[(size_t) idx (ovPtr, 3)];
+    p.exact = idx (enginePtr, 2) == 0;
     return p;
 }
 

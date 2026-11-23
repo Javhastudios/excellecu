@@ -11,6 +11,7 @@ inline juce::String band (int slot, const char* field) { return "b" + juce::Stri
 inline juce::String set (int slot, int key, const char* field) { return "b" + juce::String (slot + 1) + "_" + keyIds[key] + "_" + field; }
 inline constexpr const char* winSize = "winSize";
 inline constexpr const char* overlap = "overlap";
+inline constexpr const char* engine = "engine";   // 0 = Exacto, 1 = Clásico
 } // namespace ids
 
 class ExcellecuProcessor : public juce::AudioProcessor, private juce::Timer
@@ -65,6 +66,7 @@ private:
     std::array<BandPtrs, eq::MAX_BANDS> ptrs {};
     std::atomic<float>* winPtr = nullptr;
     std::atomic<float>* ovPtr = nullptr;
+    std::atomic<float>* enginePtr = nullptr;
 
     eq::Engine engine;
     std::atomic<double> lastSampleRate { 48000.0 };

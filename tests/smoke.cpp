@@ -1,5 +1,5 @@
-// Prueba de humo del plugin completo: latencia, bandas de cada tipo, modos L/R y M/S,
-// límite de 12 bandas, estado guardado, mono y capturas de la interfaz.
+// Prueba de humo del plugin completo: latencia, motores Exacto y Clásico, bandas de cada tipo,
+// modos L/R y M/S, límite de 12 bandas, estado guardado, mono y capturas de la interfaz.
 //   ex_smoke <carpeta-salida>
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
@@ -60,6 +60,26 @@ static auto sine (double f, double amp = 0.25)
 }
 static const double sineRms = 0.25 / std::sqrt (2.0);
 
+// Residuo tras quitar un seno de frecuencia f (ajuste por mínimos cuadrados), en dBFS
+static double residualDbfs (const std::vector<float>& v, int from, int to, double f)
+{
+    double ss = 0, sc = 0, cc = 0, ys = 0, yc = 0;
+    for (int i = from; i < to; ++i)
+    {
+        const double s = std::sin (2 * eq::PI * f * i / 48000.0), c = std::cos (2 * eq::PI * f * i / 48000.0);
+        ss += s * s; sc += s * c; cc += c * c; ys += v[(size_t) i] * s; yc += v[(size_t) i] * c;
+    }
+    const double det = ss * cc - sc * sc;
+    const double a = (ys * cc - yc * sc) / det, b = (yc * ss - ys * sc) / det;
+    double e = 0;
+    for (int i = from; i < to; ++i)
+    {
+        const double r = v[(size_t) i] - a * std::sin (2 * eq::PI * f * i / 48000.0) - b * std::cos (2 * eq::PI * f * i / 48000.0);
+        e += r * r;
+    }
+    return 20 * std::log10 (std::sqrt (e / (to - from)) + 1e-30);
+}
+
 static void snapshot (Component& c, const File& f)
 {
     auto img = c.createComponentSnapshot (c.getLocalBounds(), true, 1.0f);
@@ -86,6 +106,43 @@ int main (int argc, char** argv)
         for (int i = 0; i < 20000; ++i) if (std::abs (out[0][(size_t) i]) > std::abs (out[0][(size_t) peakAt])) peakAt = i;
         check (peakAt == 1000 + 4096, "impulso retrasado exactamente la latencia (" + String (peakAt - 1000) + ")");
         check (std::abs (out[0][(size_t) peakAt] - 1.0f) < 1e-5f, "sin bandas la salida es idéntica a la entrada");
+    }
+
+    {
+        std::cout << "Motores Exacto y Clásico" << std::endl;
+        ExcellecuProcessor p;
+        p.prepareToPlay (SR, 480);
+        ui::BandModel m (p);
+        check (p.currentParams().exact, "arranca en motor Exacto");
+        for (int e = 0; e < 2; ++e)
+        {
+            const String name = e == 0 ? "Exacto" : "Clásico";
+            m.set (ids::engine, (float) e);
+            m.set (ids::winSize, 2.0f);
+            auto out = run (p, 20000, [] (int i, int) { return i == 1000 ? 1.0f : 0.0f; });
+            int peakAt = 0;
+            for (int i = 0; i < 20000; ++i) if (std::abs (out[0][(size_t) i]) > std::abs (out[0][(size_t) peakAt])) peakAt = i;
+            check (peakAt == 1000 + 4096 && std::abs (out[0][(size_t) peakAt] - 1.0f) < 1e-5f,
+                   name + ": sin bandas, impulso intacto y retrasado 4096 (" + String (peakAt - 1000) + ")");
+        }
+
+        // Caso medido en Plugin Doctor: seno de 29,6 Hz a −6 dBFS con HPF 50 Hz 48 dB/oct, ventana 8192
+        const int hp = m.create (eq::HighPass, 50.3, 0);
+        m.set (ids::set (hp, eq::St, "slope"), 3.0f);
+        m.set (ids::winSize, 3.0f);
+        double res[2];
+        for (int e = 0; e < 2; ++e)
+        {
+            m.set (ids::engine, (float) e);
+            auto o = run (p, 120000, sine (29.6, 0.5));
+            res[e] = residualDbfs (o[0], 50000, 110000, 29.6);
+            check (finite (o[0]), String (e == 0 ? "Exacto" : "Clásico") + ": HPF en graves sin valores raros");
+        }
+        check (res[0] < -120, "Exacto: residuo del HPF 48 dB/oct en graves " + String (res[0], 1) + " dBFS (objetivo < −120)");
+        std::cout << "  info  Clásico: residuo " << res[1] << " dBFS" << std::endl;
+        m.set (ids::engine, 0.0f);
+        MessageManager::getInstance()->runDispatchLoopUntil (300);
+        check (p.getLatencySamples() == 8192, "latencia 8192 con ventana 8192 en modo Exacto (" + String (p.getLatencySamples()) + ")");
     }
 
     {
@@ -154,7 +211,7 @@ int main (int argc, char** argv)
         ExcellecuProcessor q;
         q.setStateInformation (state.getData(), (int) state.getSize());
         const auto a = p.currentParams(), b = q.currentParams();
-        bool same = a.n == b.n && a.overlap == b.overlap;
+        bool same = a.n == b.n && a.overlap == b.overlap && a.exact == b.exact;
         for (int s = 0; s < eq::MAX_BANDS; ++s)
         {
             const auto &x = a.bands[(size_t) s], &y = b.bands[(size_t) s];

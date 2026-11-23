@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EQ Motor DFT — Prototipo v0.17</title>
+<title>EQ Motor DFT — Prototipo v0.18</title>
 <style>
   :root {
     --bg: #0e0e10;
@@ -240,7 +240,7 @@
 </head>
 <body>
 
-<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.17</h1>
+<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.18</h1>
 
 <div class="modules">
 
@@ -330,14 +330,19 @@
 
           <hr class="divider">
           <div class="panel-title">Motor DFT</div>
+          <div class="ms-row"><span class="ms-lbl">Modo</span>
+            <button class="ms-btn" id="eng-exact" title="Convolución exacta con zero-padding: sin aliasing temporal ni huella de bloque">Exacto</button>
+            <button class="ms-btn" id="eng-classic" title="STFT original (Hann + overlap-add), con ventana periódica">Clásico</button>
+          </div>
           <div class="control">
             <label>Tamaño ventana <span id="lbl-n">4096</span></label>
             <input type="range" id="sl-n" min="0" max="3" step="1" value="2">
           </div>
-          <div class="control">
+          <div class="control" id="ov-row">
             <label>Overlap <span id="lbl-ov">50%</span></label>
             <input type="range" id="sl-ov" min="0" max="2" step="1" value="1">
           </div>
+          <div id="eng-note" style="font-size:9px;color:var(--muted);line-height:1.6;margin-bottom:8px;opacity:0.8"></div>
 
           <button class="process-btn" id="process-btn" onclick="processAudio()" disabled>Procesar audio</button>
           <div class="progress-wrap" id="proc-progress" style="display:block;margin-top:8px">
@@ -450,6 +455,7 @@ function makeBand(type, params = {}) {
 
 let N      = 4096;
 let overlap = 0.5;
+let engine  = 'exact';     // 'exact' (convolución con zero-padding) | 'classic' (STFT original)
 
 // ── FFT Cooley-Tukey ──────────────────────────────────────────────────
 function fft_complex(xRe, xIm) {
@@ -485,10 +491,12 @@ function ifft_complex(re, im) {
   return out;
 }
 
-// ── Ventana Hann ──────────────────────────────────────────────────────
+// ── Ventana Hann (periódica) ──────────────────────────────────────────
+// Para overlap-add se usa la versión periódica (divide entre n, no n−1):
+// así la suma de ventanas² es constante al 75 % y no queda huella de bloque.
 function hannWindow(n) {
   const w = new Float64Array(n);
-  for (let i = 0; i < n; i++) w[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (n - 1)));
+  for (let i = 0; i < n; i++) w[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / n));
   return w;
 }
 
@@ -691,9 +699,134 @@ function processMonoBlock(b, resp, win) {
   return synthesizeBlock(X, win);
 }
 
-// ── Procesar audio completo (overlap-add) ─────────────────────────────
+// ── Motor exacto: convolución por bloques con zero-padding ───────────
+// Mismas curvas gaussianas, pero aplicadas como un filtro fijo de fase cero
+// (convolución lineal exacta) en lugar de multiplicar bins de bloques con ventana.
+//
+//   Tamaño FFT  NF = 2·N
+//   Filtro      h[n], n = −N/2 … +N/2 (simétrico, fase cero), recortado con
+//               ventana coseno → longitud N+1
+//   Bloque      B = N/2 muestras de audio SIN ventana, rellenadas con ceros hasta NF
+//   Salida      B + N muestras por bloque ≤ NF → la convolución no da la vuelta
+//   Latencia    (plugin) B de acumulación + N/2 de anticipación = N, igual que el clásico
+//
+// Las etapas L/R y M/S se combinan en una matriz 2×2 de respuestas antes de
+// recortar, para que el filtro total siga cabiendo en el bloque:
+//   Lout = A·L + Bx·R      A  = (Hm+Hs)/2 · Hl     Bx = (Hm−Hs)/2 · Hr
+//   Rout = C·L + D·R       C  = (Hm−Hs)/2 · Hl     D  = (Hm+Hs)/2 · Hr
+
+// Ganancia real de un rol en los bins 0 … nf/2
+function denseGains(nf, sr, role) {
+  const binHz = sr / nf;
+  const freqs = new Float64Array(nf / 2 + 1);
+  for (let k = 0; k < freqs.length; k++) freqs[k] = k * binHz;
+  return responseAt(freqs, role);
+}
+
+// Respuesta real (bins 0 … nf/2) → espectro completo de un filtro de fase cero
+// recortado a ±half muestras. Devuelve null si el filtro es nulo (todo ceros).
+function kernelSpectrum(G, nf, half) {
+  let allZero = true;
+  for (let k = 0; k < G.length; k++) if (Math.abs(G[k]) > 1e-12) { allZero = false; break; }
+  if (allZero) return null;
+  const re = new Float64Array(nf), im = new Float64Array(nf);
+  for (let k = 0; k <= nf / 2; k++) {
+    re[k] = G[k];
+    if (k > 0 && k < nf / 2) re[nf - k] = G[k];       // simetría hermítica (real y par)
+  }
+  const h  = ifft_complex(re, im);                      // h[n] = h[−n], centrado en 0
+  const hw = new Float64Array(nf);
+  for (let n = 0; n <= half; n++) {
+    const w = 0.5 * (1 + Math.cos(Math.PI * n / (half + 1)));   // 1 en el centro → 0 en los extremos
+    hw[n] = h[n] * w;
+    if (n > 0) hw[nf - n] = h[nf - n] * w;
+  }
+  return fft_complex(hw, new Float64Array(nf));
+}
+
+// Y = K1·X1 (+ K2·X2), espectros completos
+function specMix(K1, X1, K2, X2) {
+  const n = X1.re.length, re = new Float64Array(n), im = new Float64Array(n);
+  if (K1) for (let k = 0; k < n; k++) {
+    re[k] = K1.re[k] * X1.re[k] - K1.im[k] * X1.im[k];
+    im[k] = K1.re[k] * X1.im[k] + K1.im[k] * X1.re[k];
+  }
+  if (K2) for (let k = 0; k < n; k++) {
+    re[k] += K2.re[k] * X2.re[k] - K2.im[k] * X2.im[k];
+    im[k] += K2.re[k] * X2.im[k] + K2.im[k] * X2.re[k];
+  }
+  return { re, im };
+}
+
+async function processExact(sr, numCh, totalLen, progress) {
+  const nf = 2 * N, half = N / 2, B = N / 2;
+  const gl = denseGains(nf, sr, 'l'), gr = denseGains(nf, sr, 'r');
+  const gm = denseGains(nf, sr, 'm'), gs = denseGains(nf, sr, 's');
+  const len = nf / 2 + 1;
+
+  let K;
+  if (numCh === 2) {
+    const A = new Float64Array(len), Bx = new Float64Array(len);
+    const C = new Float64Array(len), D  = new Float64Array(len);
+    for (let k = 0; k < len; k++) {
+      const p = (gm[k] + gs[k]) / 2, q = (gm[k] - gs[k]) / 2;
+      A[k] = p * gl[k]; Bx[k] = q * gr[k]; C[k] = q * gl[k]; D[k] = p * gr[k];
+    }
+    K = { A: kernelSpectrum(A, nf, half), B: kernelSpectrum(Bx, nf, half),
+          C: kernelSpectrum(C, nf, half), D: kernelSpectrum(D, nf, half) };
+  } else {
+    const H = new Float64Array(len);
+    for (let k = 0; k < len; k++) H[k] = gl[k] * gm[k];   // mono: L en etapa 1, Mid en etapa 2
+    K = { H: kernelSpectrum(H, nf, half) };
+  }
+
+  const groups  = numCh === 2 ? [[0, 1]] : Array.from({ length: numCh }, (_, c) => [c]);
+  const outputs = Array.from({ length: numCh }, () => new Float64Array(totalLen + 2 * N));
+  const blocksPerGroup = Math.ceil(totalLen / B);
+  const zeroIm = new Float64Array(nf);
+
+  for (let gi = 0; gi < groups.length; gi++) {
+    const chs = groups[gi];
+    const src = chs.map(c => rawBuffer.getChannelData(c));
+    let blockCount = 0;
+    for (let p = 0; p < totalLen; p += B) {
+      const X = src.map(s => {
+        const xr = new Float64Array(nf);                   // bloque sin ventana + ceros
+        const end = Math.min(B, totalLen - p);
+        for (let i = 0; i < end; i++) xr[i] = s[p + i];
+        return fft_complex(xr, zeroIm);
+      });
+      const Y = chs.length === 2
+        ? [specMix(K.A, X[0], K.B, X[1]), specMix(K.C, X[0], K.D, X[1])]
+        : [specMix(K.H, X[0], null, null)];
+      chs.forEach((c, j) => {
+        const y = ifft_complex(Y[j].re, Y[j].im), o = outputs[c];
+        // Índice en 'o' = tiempo + half (para alojar la parte anticipada del filtro)
+        for (let n = 0; n < N; n++)          o[p + half + n]      += y[n];   // tiempos p … p+N−1
+        for (let n = nf - half; n < nf; n++) o[p + half + n - nf] += y[n];   // tiempos p−N/2 … p−1
+      });
+      blockCount++;
+      if (blockCount % 10 === 0) {
+        progress(((gi * blocksPerGroup + blockCount) / (groups.length * blocksPerGroup)) * 100);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+  }
+
+  return {
+    channels: outputs.map(o => {
+      const r = new Float32Array(totalLen);
+      for (let i = 0; i < totalLen; i++) r[i] = o[i + half];
+      return r;
+    }),
+    blocks: blocksPerGroup * groups.length,
+  };
+}
+
+// ── Procesar audio completo ───────────────────────────────────────────
 async function processAudio() {
   if (!rawBuffer) return;
+  if (engine === 'exact') return processAudioExact();
 
   const btn = document.getElementById('process-btn');
   btn.disabled = true;
@@ -798,6 +931,51 @@ async function processAudio() {
   btn.textContent = 'Procesar audio';
 
   updateCharts();
+}
+
+// Envoltorio del motor exacto: misma interfaz y estados que el clásico
+async function processAudioExact() {
+  const btn = document.getElementById('process-btn');
+  btn.disabled = true;
+  btn.textContent = 'Procesando...';
+  document.getElementById('m2-status').textContent = 'procesando (exacto)...';
+  document.getElementById('m2-status').className = 'module-status warn';
+  await new Promise(r => setTimeout(r, 10));
+
+  const sr = rawBuffer.sampleRate, numCh = rawBuffer.numberOfChannels;
+  const totalLen = rawBuffer.getChannelData(0).length;
+  const res = await processExact(sr, numCh, totalLen,
+    pct => { document.getElementById('proc-bar').style.width = Math.round(pct) + '%'; });
+  processedPCM = res.channels;
+
+  const useMS = anyGroup('ms'), useLR = anyGroup('lr');
+  document.getElementById('proc-bar').style.width = '100%';
+  document.getElementById('m2-status').textContent = 'procesado ✓';
+  document.getElementById('m2-status').className = 'module-status ok';
+  document.getElementById('m3-status').textContent = 'listo para exportar';
+  document.getElementById('m3-status').className = 'module-status ok';
+  document.getElementById('export-btn').disabled = false;
+  document.getElementById('btn-proc').disabled = false;
+  const chLabel = numCh === 1 ? 'Mono' : 'Estéreo';
+  document.getElementById('export-info').innerHTML =
+    `Audio procesado: <span class="ok">${totalLen.toLocaleString()} muestras</span> · ` +
+    `${numCh} canal${numCh>1?'es':''} (${chLabel}) · ${res.blocks} bloques · motor <span class="ok">exacto</span> (filtro de ${N+1} muestras, FFT ${2*N})` +
+    `${(useLR || useMS) ? ' · etapas: <span class="ok">' + [useLR && 'L/R', useMS && 'M/S'].filter(Boolean).join(' → ') + '</span>' : ''}<br>` +
+    `Listo para descargar como <span class="ok">WAV 32-bit float ${chLabel}</span>.`;
+  btn.disabled = false;
+  btn.textContent = 'Procesar audio';
+  updateCharts();
+}
+
+function setEngine(e) {
+  engine = e;
+  $id('eng-exact').classList.toggle('ms-active', e === 'exact');
+  $id('eng-classic').classList.toggle('ms-active', e === 'classic');
+  $id('ov-row').style.opacity = e === 'exact' ? '0.35' : '1';
+  $id('sl-ov').disabled = e === 'exact';
+  $id('eng-note').textContent = e === 'exact'
+    ? `Exacto: bloques de ${N/2} muestras sin ventana, FFT de ${2*N}, filtro de ${N+1} muestras. El overlap no se usa. Latencia como plugin: ${N} muestras.`
+    : `Clásico: STFT con Hann periódica en análisis y síntesis. Usa 75 % de overlap para que las ventanas sumen plano. Latencia como plugin: ${N} muestras.`;
 }
 
 // ── Módulo 1: Carga ───────────────────────────────────────────────────
@@ -1614,6 +1792,7 @@ function initChartWidth() {
 document.getElementById('sl-n').addEventListener('input', function() {
   N = N_OPTIONS[parseInt(this.value)];
   document.getElementById('lbl-n').textContent = N_LABELS[parseInt(this.value)];
+  setEngine(engine);
   updateCharts();
 });
 document.getElementById('sl-ov').addEventListener('input', function() {
@@ -1776,6 +1955,9 @@ function initPanel() {
 window.addEventListener('resize', () => { initChartWidth(); updateCharts(); });
 initChartWidth();
 initPanel();
+$id('eng-exact').addEventListener('click', () => setEngine('exact'));
+$id('eng-classic').addEventListener('click', () => setEngine('classic'));
+setEngine(engine);
 initHandleEvents();
 syncPanel();
 updateCharts();

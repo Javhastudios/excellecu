@@ -1,13 +1,20 @@
-# Excellecu — EQ por DFT con bandas dinámicas (prototipo v0.17)
+# Excellecu — EQ por DFT con bandas dinámicas (prototipo v0.18)
 
-Ecualizador que trabaja en el dominio de la frecuencia: ventana Hann, FFT, ganancia en cada
-bin, FFT inversa y suma solapada. Sale del prototipo web `web/eq-dft-proto.html` (v0.17).
+Ecualizador de fase cero que trabaja en el dominio de la frecuencia, con curvas gaussianas.
+Sale del prototipo web `web/eq-dft-proto.html` (v0.18, `eq_dft_proto_50_motor_exacto.html`).
 
 - Hasta 12 bandas, de cinco tipos: campana, low shelf, high shelf, high pass y low pass.
 - Cada banda puede ir en Estéreo, L/R (un ajuste para cada canal) o M/S (Mid y Side).
 - Se crean y se mueven sobre la gráfica: doble clic crea, arrastrar mueve, Mayús + arrastrar
   cambia Q o pendiente, Alt afina, rueda = Q/pendiente, clic derecho = menú, Supr = borrar.
-- Motor: ventana de 512, 1024, 4096 u 8192 muestras y solape del 25, 50 o 75 %.
+- Dos motores, seleccionables:
+  - **Exacto** (por defecto): las curvas se convierten en un filtro fijo de fase cero de N+1
+    muestras y se aplican por convolución lineal exacta (bloques de N/2 sin ventana, FFT de 2N).
+    Sin aliasing temporal ni huella de bloque: el residuo del HPF en graves baja de −70 a
+    −155 dBFS.
+  - **Clásico**: ventana Hann (periódica), FFT, ganancia en cada bin, FFT inversa y suma
+    solapada (25, 50 o 75 %).
+- Ventana N de 512, 1024, 4096 u 8192 muestras. Latencia N en los dos motores.
 
 Formatos: VST3 (Windows, macOS, Linux) y AU (macOS). Efecto estéreo o mono.
 

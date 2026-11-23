@@ -4,8 +4,9 @@
 //
 //   node tests/run_js.mjs <carpeta-salida>
 //
-// La web v0.17 rellena con silencio el principio, así que su resultado es "en régimen" desde
-// la primera muestra: se compara el archivo entero.
+// La web rellena con silencio el principio, así que su resultado es "en régimen" desde la
+// primera muestra: se compara el archivo entero. Cada escenario se ejecuta con los dos motores
+// de la web v0.18: Clásico (nombre tal cual) y Exacto (prefijo "x_").
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
@@ -96,7 +97,18 @@ function element() {
 const KEYS = ['st', 'l', 'r', 'm', 's'];
 const TYPES = ['bell', 'ls', 'hs', 'hp', 'lp'];
 const names = [];
+// Escenario extra para el motor exacto: el caso medido en Plugin Doctor (HPF 48 dB/oct en graves)
+scenarios.hpf_graves = { N: 8192, overlap: 0.75, bands: [
+  { type: 'hp', st: { fc: 50.3, slope: 48 } },
+  { type: 'bell', st: { fc: 64, gain: 5, q: 1 } },
+  { type: 'bell', edit: 's', s: { fc: 100, gain: -6, q: 1 } },
+] };
+const runs = [];
 for (const [name, sc] of Object.entries(scenarios)) {
+  runs.push([name, sc, 'classic']);
+  runs.push(['x_' + name, sc, 'exact']);
+}
+for (const [name, sc, engineMode] of runs) {
   const ctx = vm.createContext({
     document: { getElementById: () => element(), createElement: () => element(), activeElement: null },
     window: { addEventListener() {}, devicePixelRatio: 1, innerWidth: 1200, innerHeight: 800 },
@@ -108,8 +120,9 @@ for (const [name, sc] of Object.entries(scenarios)) {
   const numCh = sc.mono ? 1 : 2;
   ctx.__buf = { sampleRate: SR, numberOfChannels: numCh, getChannelData: (c) => (c === 0 ? L : R) };
   ctx.__spec = sc;
+  ctx.__engine = engineMode;
   vm.runInContext(`
-    N = __spec.N; overlap = __spec.overlap; bands = []; nextBandId = 1;
+    N = __spec.N; overlap = __spec.overlap; engine = __engine; bands = []; nextBandId = 1;
     for (const s of __spec.bands) {
       const b = makeBand(s.type, s.st || {});
       bands.push(b);
@@ -126,7 +139,7 @@ for (const [name, sc] of Object.entries(scenarios)) {
   fs.writeFileSync(path.join(outDir, name + '.js.f32'), Buffer.from(out.buffer));
 
   // Guion para el lado C++, con TODOS los juegos tal como quedaron en la web
-  const lines = [`channels ${numCh}`, `N ${sc.N}`, `overlap ${sc.overlap}`];
+  const lines = [`channels ${numCh}`, `N ${sc.N}`, `overlap ${sc.overlap}`, `engine ${engineMode}`];
   bands.forEach((b, slot) => {
     lines.push(`band ${slot} ${TYPES.indexOf(b.type)} ${KEYS.indexOf(b.edit)}`);
     KEYS.forEach((k, ki) => {
@@ -136,6 +149,6 @@ for (const [name, sc] of Object.entries(scenarios)) {
   });
   fs.writeFileSync(path.join(outDir, name + '.txt'), lines.join('\n') + '\n');
   names.push(name);
-  console.log(`JS ${name}: ${numCh} canal(es), ${bands.length} banda(s)`);
+  console.log(`JS ${name}: motor ${engineMode}, ${numCh} canal(es), ${bands.length} banda(s)`);
 }
 fs.writeFileSync(path.join(outDir, 'scenarios.json'), JSON.stringify(names));

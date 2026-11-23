@@ -1,8 +1,11 @@
-// Motor del EQ: traducción del prototipo web v0.17 (web/eq-dft-proto.html) a C++ sin JUCE.
+// Motor del EQ: traducción del prototipo web v0.18 (web/eq-dft-proto.html) a C++ sin JUCE.
 //
-// La web procesa el archivo entero (ventana Hann, FFT, respuesta por bin, IFFT y suma
-// solapada). Aquí se hace lo mismo en tiempo real: se guardan las últimas N muestras y cada
-// "hop" muestras se procesa una ventana. Latencia = N muestras (se declara al DAW).
+// Dos motores, como en la web:
+//  · Clásico: ventana Hann (periódica), FFT, respuesta por bin, IFFT y suma solapada. Aquí en
+//    tiempo real: se guardan las últimas N muestras y cada "hop" muestras se procesa una ventana.
+//  · Exacto: las mismas curvas como un filtro fijo de fase cero de N+1 muestras, aplicado por
+//    convolución lineal exacta (bloques de N/2 sin ventana, rellenos con ceros hasta FFT 2N).
+// Latencia = N muestras en los dos (se declara al DAW).
 //
 // Bandas: hasta 12, de cinco tipos, cada una con cinco juegos de ajustes (Estéreo, L, R,
 // Mid, Side). El juego que se edita decide el modo de la banda: Estéreo (etapa L/R, igual en
@@ -32,6 +35,7 @@ inline const std::array<int, 4> N_OPTIONS { 512, 1024, 4096, 8192 };
 inline const std::array<double, 3> OV_OPTIONS { 0.25, 0.5, 0.75 };
 inline const std::array<int, 4> SLOPES { 6, 12, 24, 48 };
 constexpr int MAX_N = 8192;
+constexpr int MAX_NF = 2 * MAX_N;   // FFT del motor exacto
 constexpr int MAX_BANDS = 12;
 
 enum Type { Bell = 0, LowShelf, HighShelf, HighPass, LowPass, NUM_TYPES };
@@ -68,6 +72,7 @@ struct Params
     std::array<Band, MAX_BANDS> bands;
     int n = 4096;
     double overlap = 0.5;
+    bool exact = true;                // motor Exacto (true) o Clásico (false)
     bool sameBands (const Params& o) const { return bands == o.bands; }
     bool anyGroup (Group g) const
     {
@@ -171,9 +176,10 @@ inline void responseAt (const Params& p, int role, const double* freqs, int coun
     }
 }
 
+// Ventana Hann periódica (divide entre n, no n−1), como la web v0.18
 inline void hannWindow (int n, double* w)
 {
-    for (int i = 0; i < n; ++i) w[i] = 0.5 * (1 - std::cos (2 * PI * i / (n - 1)));
+    for (int i = 0; i < n; ++i) w[i] = 0.5 * (1 - std::cos (2 * PI * i / n));
 }
 
 // ── FFT compleja radix-2 iterativa ────────────────────────────────────────
@@ -273,13 +279,19 @@ public:
             windows.emplace_back ((size_t) N_OPTIONS[(size_t) s]);
             hannWindow (N_OPTIONS[(size_t) s], windows.back().data());
         }
+        for (int s = 0; s < (int) N_OPTIONS.size(); ++s) ffts2.emplace_back (2 * N_OPTIONS[(size_t) s]);
         for (auto& b : inBuf) b.assign (MAX_N, 0.0);
         for (auto& b : outBuf) b.assign (MAX_N, 0.0);
         for (auto& r : resp) r.g.assign (MAX_N / 2, 1.0);
-        for (auto& v : re) v.assign (MAX_N, 0.0);
-        for (auto& v : im) v.assign (MAX_N, 0.0);
-        freqs.assign (MAX_N / 2, 0.0);
+        for (auto& v : re) v.assign (MAX_NF, 0.0);
+        for (auto& v : im) v.assign (MAX_NF, 0.0);
+        freqs.assign (MAX_NF / 2 + 1, 0.0);
         norm.assign (MAX_N, 0.0);
+        // Motor exacto
+        for (auto& v : dense) v.assign (MAX_NF / 2 + 1, 1.0);
+        for (auto& k : kern) { k.re.assign (MAX_NF, 0.0); k.im.assign (MAX_NF, 0.0); }
+        for (auto& b : acc) b.assign (3 * MAX_N / 2, 0.0);
+        tmpRe.assign (MAX_NF, 0.0); tmpIm.assign (MAX_NF, 0.0); mixG.assign (MAX_NF / 2 + 1, 0.0);
         applyLayout();
         rebuild();
     }
@@ -290,13 +302,14 @@ public:
     {
         for (auto& b : inBuf) std::fill (b.begin(), b.end(), 0.0);
         for (auto& b : outBuf) std::fill (b.begin(), b.end(), 0.0);
+        for (auto& b : acc) std::fill (b.begin(), b.end(), 0.0);
         idx = 0;
     }
 
     // Solo recalcula lo que cambia
     void setParams (const Params& np)
     {
-        const bool layout = np.n != p.n || np.overlap != p.overlap;
+        const bool layout = np.n != p.n || np.overlap != p.overlap || np.exact != p.exact;
         const bool bandsChanged = ! np.sameBands (p);
         p = np;
         if (layout) { applyLayout(); reset(); }
@@ -305,10 +318,11 @@ public:
 
     const Params& params() const { return p; }
     int latency() const { return p.n; }
-    int hopSize() const { return hop; }
+    int hopSize() const { return p.exact ? p.n / 2 : hop; }
 
     void process (float* const* ch, int numCh, int numSamples)
     {
+        if (p.exact) { processExact (ch, numCh, numSamples); return; }
         const int n = p.n;
         const bool stereo = numCh >= 2;
         const int nc = stereo ? 2 : 1;
@@ -347,8 +361,166 @@ private:
 
     void rebuild()
     {
-        for (int role = 0; role < 4; ++role) computeResponse (p, role, p.n, sr, resp[(size_t) role], freqs);
+        if (p.exact) kernelsFor = 0;   // el motor exacto recalcula sus filtros en el siguiente bloque
+        else for (int role = 0; role < 4; ++role) computeResponse (p, role, p.n, sr, resp[(size_t) role], freqs);
         useMS = p.anyGroup (GroupMS);
+    }
+
+    // ── Motor exacto (processExact de la web, en tiempo real) ────────────────
+    // Bloque B = N/2 muestras sin ventana, FFT NF = 2N, filtro de fase cero de ±N/2 muestras.
+    // acc guarda la salida pendiente: acc[0] es la muestra que sale ahora (hace N muestras).
+    // Cuando se completa un bloque, abarca desde N/2 antes de su inicio hasta N/2 después de
+    // su final: 3N/2 muestras, justo lo que cubre acc tras desplazarlo B.
+    struct Kernel { std::vector<double> re, im; bool null = true; };
+    enum { KA = 0, KB, KC, KD, KH, NUM_KERNELS };
+
+    // denseGains de la web: ganancia real de un rol en los bins 0 … nf/2
+    void denseGains (int role, int nf, double* g)
+    {
+        const double binHz = sr / nf;
+        const int count = nf / 2 + 1;
+        for (int k = 0; k < count; ++k) freqs[(size_t) k] = k * binHz;
+        responseAt (p, role, freqs.data(), count, g);
+    }
+
+    // kernelSpectrum de la web: respuesta real → filtro simétrico recortado a ±half con
+    // ventana coseno → espectro completo. Filtro nulo (todo ceros) → null.
+    void kernelSpectrum (const double* G, int nf, int half, Kernel& K)
+    {
+        bool allZero = true;
+        for (int k = 0; k <= nf / 2; ++k) if (std::abs (G[k]) > 1e-12) { allZero = false; break; }
+        K.null = allZero;
+        if (allZero) return;
+        const auto& fft = ffts2[(size_t) sizeIdx];
+        double* r = tmpRe.data(); double* i = tmpIm.data();
+        std::fill (r, r + nf, 0.0); std::fill (i, i + nf, 0.0);
+        for (int k = 0; k <= nf / 2; ++k)
+        {
+            r[k] = G[k];
+            if (k > 0 && k < nf / 2) r[nf - k] = G[k];      // simetría hermítica (real y par)
+        }
+        fft.forward (r, i);                                  // ifft = conj(fft(conj(X))) / n; aquí X real
+        const double inv = 1.0 / nf;
+        double* hr = K.re.data(); double* hi = K.im.data();
+        std::fill (hr, hr + nf, 0.0); std::fill (hi, hi + nf, 0.0);
+        for (int n = 0; n <= half; ++n)
+        {
+            const double w = 0.5 * (1 + std::cos (PI * n / (half + 1)));   // 1 en el centro → 0 en los extremos
+            hr[n] = r[n] * inv * w;
+            if (n > 0) hr[nf - n] = r[nf - n] * inv * w;
+        }
+        fft.forward (hr, hi);
+    }
+
+    void buildKernels (bool stereo)
+    {
+        const int nf = 2 * p.n, half = p.n / 2, len = nf / 2 + 1;
+        for (int role = 0; role < 4; ++role) denseGains (role, nf, dense[(size_t) role].data());
+        const double *gl = dense[RoleL].data(), *gr = dense[RoleR].data(), *gm = dense[RoleM].data(), *gs = dense[RoleS].data();
+        double* G = mixG.data();
+        if (stereo)
+        {
+            // Lout = A·L + B·R, Rout = C·L + D·R (las dos etapas combinadas antes de recortar)
+            for (int k = 0; k < len; ++k) G[k] = (gm[k] + gs[k]) / 2 * gl[k];
+            kernelSpectrum (G, nf, half, kern[KA]);
+            for (int k = 0; k < len; ++k) G[k] = (gm[k] - gs[k]) / 2 * gr[k];
+            kernelSpectrum (G, nf, half, kern[KB]);
+            for (int k = 0; k < len; ++k) G[k] = (gm[k] - gs[k]) / 2 * gl[k];
+            kernelSpectrum (G, nf, half, kern[KC]);
+            for (int k = 0; k < len; ++k) G[k] = (gm[k] + gs[k]) / 2 * gr[k];
+            kernelSpectrum (G, nf, half, kern[KD]);
+        }
+        else
+        {
+            for (int k = 0; k < len; ++k) G[k] = gl[k] * gm[k];   // mono: L en etapa 1, Mid en etapa 2
+            kernelSpectrum (G, nf, half, kern[KH]);
+        }
+        kernelsFor = stereo ? 2 : 1;
+    }
+
+    void processExact (float* const* ch, int numCh, int numSamples)
+    {
+        const int B = p.n / 2;
+        const bool stereo = numCh >= 2;
+        const int nc = stereo ? 2 : 1;
+        if (kernelsFor != nc) buildKernels (stereo);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            for (int c = 0; c < nc; ++c)
+            {
+                inBuf[(size_t) c][(size_t) idx] = ch[c][i];
+                ch[c][i] = (float) acc[(size_t) c][(size_t) idx];
+            }
+            if (++idx == B)
+            {
+                idx = 0;
+                processExactBlock (nc);
+            }
+        }
+        for (int c = nc; c < numCh; ++c) std::memset (ch[c], 0, sizeof (float) * (size_t) numSamples);
+    }
+
+    // Y = K1·X1 (+ K2·X2), espectros completos (specMix de la web)
+    static void specMix (const Kernel& K1, const double* x1r, const double* x1i,
+                         const Kernel& K2, const double* x2r, const double* x2i,
+                         double* yr, double* yi, int n)
+    {
+        for (int k = 0; k < n; ++k) { yr[k] = 0.0; yi[k] = 0.0; }
+        if (! K1.null)
+            for (int k = 0; k < n; ++k)
+            {
+                yr[k] = K1.re[(size_t) k] * x1r[k] - K1.im[(size_t) k] * x1i[k];
+                yi[k] = K1.re[(size_t) k] * x1i[k] + K1.im[(size_t) k] * x1r[k];
+            }
+        if (x2r != nullptr && ! K2.null)
+            for (int k = 0; k < n; ++k)
+            {
+                yr[k] += K2.re[(size_t) k] * x2r[k] - K2.im[(size_t) k] * x2i[k];
+                yi[k] += K2.re[(size_t) k] * x2i[k] + K2.im[(size_t) k] * x2r[k];
+            }
+    }
+
+    void processExactBlock (int nc)
+    {
+        const int n = p.n, nf = 2 * n, half = n / 2, B = n / 2, accLen = 3 * n / 2;
+        const auto& fft = ffts2[(size_t) sizeIdx];
+
+        // Bloque sin ventana + ceros → FFT (re/im[c] de tamaño nf)
+        for (int c = 0; c < nc; ++c)
+        {
+            double* xr = re[(size_t) c].data(); double* xi = im[(size_t) c].data();
+            for (int i = 0; i < B; ++i) xr[i] = inBuf[(size_t) c][(size_t) i];
+            std::fill (xr + B, xr + nf, 0.0);
+            std::fill (xi, xi + nf, 0.0);
+            fft.forward (xr, xi);
+        }
+
+        // La salida pendiente avanza B muestras
+        for (int c = 0; c < nc; ++c)
+        {
+            auto& a = acc[(size_t) c];
+            std::memmove (a.data(), a.data() + B, sizeof (double) * (size_t) (accLen - B));
+            std::fill (a.begin() + (accLen - B), a.begin() + accLen, 0.0);
+        }
+
+        for (int c = 0; c < nc; ++c)
+        {
+            double* yr = tmpRe.data(); double* yi = tmpIm.data();
+            if (nc == 2)
+            {
+                if (c == 0) specMix (kern[KA], re[0].data(), im[0].data(), kern[KB], re[1].data(), im[1].data(), yr, yi, nf);
+                else        specMix (kern[KC], re[0].data(), im[0].data(), kern[KD], re[1].data(), im[1].data(), yr, yi, nf);
+            }
+            else specMix (kern[KH], re[0].data(), im[0].data(), kern[KH], nullptr, nullptr, yr, yi, nf);
+
+            for (int k = 0; k < nf; ++k) yi[k] = -yi[k];        // ifft = conj(fft(conj(Y))) / n
+            fft.forward (yr, yi);
+            const double inv = 1.0 / nf;
+            auto& a = acc[(size_t) c];
+            // tiempos de inicio−N/2 … inicio−1 (parte anticipada) y inicio … inicio+N−1
+            for (int m = 0; m < half; ++m) a[(size_t) m] += yr[nf - half + m] * inv;
+            for (int k = 0; k < n; ++k)    a[(size_t) (half + k)] += yr[k] * inv;
+        }
     }
 
     // processStereoBlock / processMonoBlock de la web
@@ -414,7 +586,12 @@ private:
     double sr = 48000;
     int sizeIdx = 2, hop = 2048, idx = 0;
     bool useMS = false;
-    std::vector<Fft> ffts;
+    int kernelsFor = 0;                 // canales para los que están calculados los filtros (0 = ninguno)
+    std::vector<Fft> ffts, ffts2;       // FFT de tamaño N (clásico) y 2N (exacto)
+    std::array<std::vector<double>, 4> dense;
+    std::array<Kernel, NUM_KERNELS> kern;
+    std::array<std::vector<double>, 2> acc;
+    std::vector<double> tmpRe, tmpIm, mixG;
     std::vector<std::vector<double>> windows;
     std::array<std::vector<double>, 2> inBuf, outBuf, re, im;
     std::array<Response, 4> resp;   // L, R, Mid, Side
