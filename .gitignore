@@ -1,0 +1,5 @@
+build/
+out/
+tests/out/
+smoke-out/
+.DS_Store

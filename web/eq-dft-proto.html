@@ -1,0 +1,1785 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EQ Motor DFT — Prototipo v0.17</title>
+<style>
+  :root {
+    --bg: #0e0e10;
+    --surface: #18181c;
+    --border: #2a2a30;
+    --accent: #7c6af7;
+    --accent2: #3ecfa3;
+    --warn: #f7a23e;
+    --text: #e8e8f0;
+    --muted: #6b6b7e;
+    --font: 'JetBrains Mono', 'Fira Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  h1 {
+    font-size: 14px; font-weight: 400;
+    color: var(--muted); letter-spacing: 0.12em;
+    text-transform: uppercase; margin-bottom: 24px;
+  }
+  h1 span { color: var(--accent); }
+
+  .modules { display: flex; flex-direction: column; gap: 16px; max-width: 1100px; }
+
+  .module {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .module-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 0.5px solid var(--border);
+    background: rgba(255,255,255,0.02);
+  }
+  .module-num {
+    font-size: 9px; letter-spacing: 0.15em;
+    color: var(--accent); text-transform: uppercase;
+    border: 0.5px solid var(--accent);
+    border-radius: 3px; padding: 2px 6px;
+  }
+  .module-title {
+    font-size: 11px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--text);
+  }
+  .module-status {
+    margin-left: auto; font-size: 10px;
+    color: var(--muted);
+  }
+  .module-status.ok { color: var(--accent2); }
+  .module-status.warn { color: var(--warn); }
+  .module-body { padding: 16px; }
+
+  /* Módulo 1 */
+  .drop-zone {
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    padding: 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(124,106,247,0.05);
+  }
+  .drop-zone.loaded {
+    border-color: var(--accent2);
+    color: var(--accent2);
+    background: rgba(62,207,163,0.05);
+  }
+  #file-input { display: none; }
+  .audio-info {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .info-card {
+    background: rgba(255,255,255,0.03);
+    border: 0.5px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
+  }
+  .info-card .k { font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+  .info-card .v { font-size: 13px; color: var(--accent2); margin-top: 2px; }
+
+  /* Módulo 2 */
+  .eq-layout { display: grid; grid-template-columns: 220px 1fr; gap: 16px; }
+  .eq-controls { display: flex; flex-direction: column; gap: 0; }
+  .panel-title {
+    font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 10px; padding-bottom: 6px;
+    border-bottom: 0.5px solid var(--border);
+  }
+  .control { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .control label {
+    font-size: 10px; color: var(--muted); letter-spacing: 0.06em;
+    display: flex; justify-content: space-between;
+  }
+  .control label span { color: var(--accent2); }
+  .control.eq-ctrl label span { color: var(--warn); }
+  input[type=range] {
+    width: 100%; -webkit-appearance: none;
+    height: 2px; background: var(--border);
+    border-radius: 1px; outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 12px; height: 12px;
+    border-radius: 50%; background: var(--accent); cursor: pointer;
+  }
+  .eq-ctrl input[type=range]::-webkit-slider-thumb { background: var(--warn); }
+  #hp-controls input[type=range]::-webkit-slider-thumb { background: #3ecfa3; }
+  #lp-controls input[type=range]::-webkit-slider-thumb { background: #6b9bff; }
+  #ls-controls input[type=range]::-webkit-slider-thumb { background: #7c6af7; }
+  #hs-controls input[type=range]::-webkit-slider-thumb { background: #D85A30; }
+  .ms-btn {
+    padding: 2px 6px; font-size: 9px; font-family: var(--font);
+    letter-spacing: 0.08em; background: none;
+    border: 0.5px solid var(--border); border-radius: 3px;
+    color: var(--muted); cursor: pointer; transition: all 0.15s;
+  }
+  .ms-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .ms-btn.ms-live { border-color: rgba(124,106,247,0.45); color: rgba(124,106,247,0.75); }
+  .ms-btn.ms-active { border-color: var(--accent); color: var(--accent); background: rgba(124,106,247,0.1); }
+  .ms-row { display: flex; align-items: center; gap: 3px; margin-bottom: 10px; }
+  .ms-row .ms-lbl { font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-right: auto; }
+  .divider { border: none; border-top: 0.5px solid var(--border); margin: 12px 0; }
+  .eq-section {
+    background: rgba(247,162,62,0.04);
+    border: 0.5px solid rgba(247,162,62,0.18);
+    border-radius: 4px; padding: 10px; margin-bottom: 12px;
+  }
+  .eq-charts { display: flex; flex-direction: column; gap: 12px; }
+  canvas { width: 100%; display: block; }
+
+  .process-btn {
+    width: 100%; padding: 10px;
+    background: rgba(124,106,247,0.12);
+    border: 0.5px solid var(--accent);
+    border-radius: 4px; color: var(--accent);
+    font-family: var(--font); font-size: 11px;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    cursor: pointer; transition: all 0.15s; margin-top: 8px;
+  }
+  .process-btn:hover { background: rgba(124,106,247,0.22); }
+  .process-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* Módulo 3 */
+  .export-layout { display: flex; gap: 12px; align-items: flex-start; }
+  .export-btn {
+    padding: 10px 24px;
+    background: rgba(62,207,163,0.1);
+    border: 0.5px solid var(--accent2);
+    border-radius: 4px; color: var(--accent2);
+    font-family: var(--font); font-size: 11px;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .export-btn:hover { background: rgba(62,207,163,0.2); }
+  .export-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .export-info { font-size: 10px; color: var(--muted); line-height: 1.8; }
+  .export-info .ok { color: var(--accent2); }
+
+  .play-row { display: flex; gap: 8px; margin-top: 8px; }
+  .play-btn {
+    flex: 1; padding: 8px;
+    background: none; border: 0.5px solid var(--border);
+    border-radius: 4px; color: var(--muted);
+    font-family: var(--font); font-size: 10px;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .play-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .play-btn.active { border-color: var(--warn); color: var(--warn); }
+  .play-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .progress-wrap {
+    height: 3px; background: var(--border);
+    border-radius: 2px; margin-top: 10px; overflow: hidden;
+    display: none;
+  }
+  .progress-bar {
+    height: 100%; background: var(--accent2);
+    border-radius: 2px; width: 0%;
+    transition: width 0.1s;
+  }
+  /* Bandas dinámicas */
+  .band-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; min-height: 4px; }
+  .band-chip {
+    display: flex; align-items: center; gap: 4px; padding: 2px 6px;
+    font-size: 9px; font-family: var(--font); color: var(--muted);
+    background: none; border: 0.5px solid var(--border); border-radius: 3px; cursor: pointer;
+  }
+  .band-chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .band-chip.sel { color: var(--text); border-color: var(--muted); background: rgba(255,255,255,0.05); }
+  .band-chip.off { opacity: 0.45; }
+  .band-empty { font-size: 10px; color: var(--muted); line-height: 1.6; padding: 8px 2px 12px; opacity: 0.8; }
+  .band-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .band-swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .band-name { font-size: 10px; letter-spacing: 0.06em; color: var(--text); }
+  .band-on { margin-left: auto; font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .band-on input { width: 13px; height: 13px; cursor: pointer; }
+  .type-row { flex-wrap: wrap; }
+  .band-del { width: 100%; margin-top: 4px; padding: 4px; }
+  .band-del:hover { border-color: #ff6464; color: #ff6464; }
+  .bp-ctrl label span { color: var(--band-color, var(--accent2)); }
+  #band-ctrls input[type=range]::-webkit-slider-thumb { background: var(--band-color, var(--accent)); }
+  .newtype-bar { display: flex; align-items: center; gap: 3px; margin-left: auto; }
+  .newtype-bar .ms-lbl { font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-right: 4px; }
+  .ctx-menu {
+    position: fixed; z-index: 50; display: none; min-width: 150px;
+    background: #1d1d22; border: 0.5px solid var(--border); border-radius: 4px;
+    padding: 4px 0; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-size: 10px;
+  }
+  .ctx-menu .ctx-title { padding: 4px 10px; font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+  .ctx-menu .ctx-item { padding: 5px 10px; color: var(--text); cursor: pointer; display: flex; justify-content: space-between; gap: 10px; }
+  .ctx-menu .ctx-item:hover { background: rgba(124,106,247,0.15); }
+  .ctx-menu .ctx-item.active { color: var(--accent); }
+  .ctx-menu .ctx-item.danger:hover { background: rgba(255,100,100,0.15); color: #ff6464; }
+  .ctx-menu .ctx-sep { border-top: 0.5px solid var(--border); margin: 4px 0; }
+</style>
+</head>
+<body>
+
+<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.17</h1>
+
+<div class="modules">
+
+  <!-- MÓDULO 1: CARGA DE AUDIO -->
+  <div class="module" id="mod1">
+    <div class="module-header">
+      <span class="module-num">Módulo 1</span>
+      <span class="module-title">Carga de audio</span>
+      <span class="module-status" id="m1-status">esperando archivo</span>
+    </div>
+    <div class="module-body">
+      <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <div>Arrastra un archivo de audio aquí o haz clic para seleccionar</div>
+        <div style="margin-top:6px;font-size:9px;opacity:0.5">WAV · MP3 · FLAC · AAC · OGG</div>
+      </div>
+      <input type="file" id="file-input" accept="audio/*">
+      <div class="audio-info" id="audio-info" style="display:none">
+        <div class="info-card"><div class="k">Archivo</div><div class="v" id="ai-name">—</div></div>
+        <div class="info-card"><div class="k">Duración</div><div class="v" id="ai-dur">—</div></div>
+        <div class="info-card"><div class="k">Sample rate</div><div class="v" id="ai-sr">—</div></div>
+        <div class="info-card"><div class="k">Canales</div><div class="v" id="ai-ch">—</div></div>
+      </div>
+      <div class="progress-wrap" id="load-progress">
+        <div class="progress-bar" id="load-bar"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MÓDULO 2: EQ -->
+  <div class="module" id="mod2">
+    <div class="module-header">
+      <span class="module-num">Módulo 2</span>
+      <span class="module-title">Ecualizador — banda paramétrica gaussiana</span>
+      <span class="module-status" id="m2-status">sin audio cargado</span>
+    </div>
+    <div class="module-body">
+      <div class="eq-layout">
+        <div class="eq-controls">
+          <div class="panel-title">Señal de prueba</div>
+          <div style="display:flex;gap:6px;margin-bottom:12px">
+            <button class="play-btn" id="btn-orig" onclick="playOriginal()" disabled>▶ Original</button>
+            <button class="play-btn" id="btn-proc" onclick="playProcessed()" disabled>▶ Procesado</button>
+          </div>
+
+          <hr class="divider">
+          <div class="panel-title" style="display:flex;justify-content:space-between">
+            <span>Bandas</span><span id="band-count" style="color:var(--muted)">0 / 12</span>
+          </div>
+          <div id="band-chips" class="band-chips"></div>
+
+          <div id="band-empty" class="band-empty">
+            Doble clic en la gráfica para crear un punto del tipo elegido arriba.<br>
+            Clic derecho en la gráfica para elegir el tipo en el momento.
+          </div>
+
+          <div id="band-ctrls" class="eq-section" style="display:none">
+            <div class="band-head">
+              <span id="bp-swatch" class="band-swatch"></span>
+              <span id="bp-name" class="band-name">Banda</span>
+              <label class="band-on"><input type="checkbox" id="bp-on"> Activa</label>
+            </div>
+            <div class="ms-row type-row" id="bp-types"></div>
+            <div class="ms-row"><span class="ms-lbl">Canal</span>
+              <button class="ms-btn" id="bp-st" title="Mismo ajuste en L y R">Estéreo</button>
+              <button class="ms-btn" id="bp-l" title="Canal izquierdo">L</button><button class="ms-btn" id="bp-r" title="Canal derecho">R</button><span style="width:4px"></span><button class="ms-btn" id="bp-m" title="Mid">M</button><button class="ms-btn" id="bp-s" title="Side">S</button>
+            </div>
+            <div id="bp-controls">
+              <div class="control bp-ctrl">
+                <label>Frecuencia <span id="lbl-bpfc">1.00 kHz</span></label>
+                <input type="range" id="sl-bpfc" min="0" max="1000" step="1" value="566">
+              </div>
+              <div class="control bp-ctrl" id="bp-gain-row">
+                <label>Ganancia <span id="lbl-bpgain">0.0 dB</span></label>
+                <input type="range" id="sl-bpgain" min="-20" max="12" step="0.1" value="0">
+              </div>
+              <div class="control bp-ctrl" id="bp-q-row">
+                <label>Factor Q <span id="lbl-bpq">1.00</span></label>
+                <input type="range" id="sl-bpq" min="0" max="1000" step="1" value="500">
+              </div>
+              <div class="control bp-ctrl" id="bp-slope-row">
+                <label>Pendiente <span id="lbl-bpslope">12 dB/oct</span></label>
+                <input type="range" id="sl-bpslope" min="0" max="3" step="1" value="1">
+              </div>
+            </div>
+            <button class="ms-btn band-del" id="bp-del" title="Eliminar banda (Supr)">Eliminar banda</button>
+          </div>
+
+          <hr class="divider">
+          <div class="panel-title">Motor DFT</div>
+          <div class="control">
+            <label>Tamaño ventana <span id="lbl-n">4096</span></label>
+            <input type="range" id="sl-n" min="0" max="3" step="1" value="2">
+          </div>
+          <div class="control">
+            <label>Overlap <span id="lbl-ov">50%</span></label>
+            <input type="range" id="sl-ov" min="0" max="2" step="1" value="1">
+          </div>
+
+          <button class="process-btn" id="process-btn" onclick="processAudio()" disabled>Procesar audio</button>
+          <div class="progress-wrap" id="proc-progress" style="display:block;margin-top:8px">
+            <div class="progress-bar" id="proc-bar" style="width:0%"></div>
+          </div>
+        </div>
+
+        <div class="eq-charts">
+          <div style="background:rgba(255,255,255,0.02);border:0.5px solid var(--border);border-radius:4px;padding:10px">
+            <div class="panel-title" style="display:flex;align-items:center">Magnitud<div class="newtype-bar" id="newtype-bar"><span class="ms-lbl">Nuevo punto</span></div></div>
+            <canvas id="cMag" height="160" style="touch-action:none"></canvas>
+            <div style="font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:0.04em;opacity:0.7">Doble clic = crear punto · clic derecho = elegir tipo / eliminar · arrastrar = frecuencia ↔ / ganancia ↕ · Mayús ↕ = Q / pendiente · Alt (⌥) = fino · rueda = Q / pendiente · Supr = eliminar</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.02);border:0.5px solid var(--border);border-radius:4px;padding:10px">
+            <div class="panel-title">
+              Fase
+              <span id="phase-badge" style="font-size:9px;padding:2px 6px;border-radius:3px;margin-left:6px;background:rgba(62,207,163,0.12);color:#3ecfa3;border:0.5px solid rgba(62,207,163,0.3)">sin desplazamiento ✓</span>
+            </div>
+            <canvas id="cPhase" height="130"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MÓDULO 3: EXPORTAR -->
+  <div class="module" id="mod3">
+    <div class="module-header">
+      <span class="module-num">Módulo 3</span>
+      <span class="module-title">Exportar resultado</span>
+      <span class="module-status" id="m3-status">sin audio procesado</span>
+    </div>
+    <div class="module-body">
+      <div class="export-layout">
+        <button class="export-btn" id="export-btn" onclick="exportWAV()" disabled>Descargar WAV</button>
+        <div class="export-info" id="export-info">
+          Procesa el audio en el módulo 2 para habilitar la exportación.<br>
+          El resultado se codifica como <span class="ok">WAV 32-bit float</span> sin pérdida.
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Estado global ─────────────────────────────────────────────────────
+const SR_INTERNAL = 44100;
+const N_OPTIONS   = [512,1024,4096,8192];
+const N_LABELS    = ['512','1024','4096','8192'];
+const OV_OPTIONS  = [0.25, 0.5, 0.75];
+const OV_LABELS   = ['25%','50%','75%'];
+
+let rawBuffer     = null;  // AudioBuffer original decodificado
+let processedPCM  = null;  // Float32Array resultado
+let audioCtx      = null;
+let playingNode   = null;
+let playingWhich  = null;
+
+// ── Estado de bandas (dinámicas, estilo FabFilter) ───────────────────
+// Cada banda es un punto con un TIPO y cinco juegos de parámetros:
+//   st (Estéreo) → un mismo juego para L y R
+//   l / r        → juego propio para el canal izquierdo / derecho (suenan los dos)
+//   m / s        → juego propio para el Mid / el Side (suenan los dos)
+// 'edit' indica el juego que se muestra y, por su grupo, el modo de la banda.
+// L y R parten de Estéreo al entrar en ese modo (mientras no se hayan tocado).
+// M y S empiezan planos (0 dB) en campana/shelves y apagados en filtros.
+// Las bandas se aplican en orden de creación.
+const BAND_TYPES = {
+  bell: { label: 'Campana',    short: 'Campana', gain: true,  q: true,  slope: false, shape: 'circle'  },
+  ls:   { label: 'Low shelf',  short: 'L-Shelf', gain: true,  q: true,  slope: false, shape: 'diamond' },
+  hs:   { label: 'High shelf', short: 'H-Shelf', gain: true,  q: true,  slope: false, shape: 'diamond' },
+  hp:   { label: 'High pass',  short: 'HP',      gain: false, q: false, slope: true,  shape: 'square'  },
+  lp:   { label: 'Low pass',   short: 'LP',      gain: false, q: false, slope: true,  shape: 'square'  },
+};
+const TYPE_ORDER  = ['bell', 'ls', 'hs', 'hp', 'lp'];
+const SLOPES      = [6, 12, 24, 48];
+const MAX_BANDS   = 12;
+const BAND_COLORS = ['#f7a23e','#3ecfa3','#6b9bff','#ff7aa8','#c58cff','#f2d24b',
+                     '#5bc0eb','#ff8a5c','#9be36b','#e86bd6','#7ee0d0','#d4b483'];
+
+let bands       = [];      // orden de creación = orden de aplicación
+let selectedId  = null;    // banda seleccionada (la que muestra el panel)
+let nextBandId  = 1;
+let newBandType = 'bell';  // tipo con el que se crean los puntos nuevos
+
+const bandById  = id => bands.find(b => b.id === id) || null;
+const selBand   = () => bandById(selectedId);
+const bandIndex = b => bands.indexOf(b) + 1;
+// Grupo de un modo: 'st' | 'lr' | 'ms'
+const modeGroup = m => m === 'st' ? 'st' : (m === 'l' || m === 'r') ? 'lr' : 'ms';
+// Juego que se está editando de una banda
+const editSet   = b => b.sets[b.edit];
+
+function makeBand(type, params = {}) {
+  const t = BAND_TYPES[type];
+  const base = { on: true, fc: 1000, gain: 0, q: 1.0, slope: 12, ...params };
+  if (!t.gain) base.gain = 0;
+  const used = new Set(bands.map(b => b.color));
+  const color = BAND_COLORS.find(c => !used.has(c)) || BAND_COLORS[bands.length % BAND_COLORS.length];
+  return {
+    id: nextBandId++, type, color, edit: 'st', lrFresh: true,
+    sets: {
+      st: { ...base }, l: { ...base }, r: { ...base },
+      m:  { ...base, on: t.gain, gain: 0 },
+      s:  { ...base, on: t.gain, gain: 0 },
+    }
+  };
+}
+
+let N      = 4096;
+let overlap = 0.5;
+
+// ── FFT Cooley-Tukey ──────────────────────────────────────────────────
+function fft_complex(xRe, xIm) {
+  const n = xRe.length;
+  if (n === 1) return { re: new Float64Array([xRe[0]]), im: new Float64Array([xIm[0]]) };
+  const eRe = new Float64Array(n/2), eIm = new Float64Array(n/2);
+  const oRe = new Float64Array(n/2), oIm = new Float64Array(n/2);
+  for (let i = 0; i < n/2; i++) {
+    eRe[i] = xRe[2*i];   eIm[i] = xIm[2*i];
+    oRe[i] = xRe[2*i+1]; oIm[i] = xIm[2*i+1];
+  }
+  const E = fft_complex(eRe, eIm);
+  const O = fft_complex(oRe, oIm);
+  const re = new Float64Array(n), im = new Float64Array(n);
+  for (let k = 0; k < n/2; k++) {
+    const angle = -2 * Math.PI * k / n;
+    const wr = Math.cos(angle), wi = Math.sin(angle);
+    const tr = wr * O.re[k] - wi * O.im[k];
+    const ti = wr * O.im[k] + wi * O.re[k];
+    re[k]       = E.re[k] + tr; im[k]       = E.im[k] + ti;
+    re[k + n/2] = E.re[k] - tr; im[k + n/2] = E.im[k] - ti;
+  }
+  return { re, im };
+}
+
+function ifft_complex(re, im) {
+  const n = re.length;
+  const cRe = new Float64Array(n), cIm = new Float64Array(n);
+  for (let i = 0; i < n; i++) { cRe[i] = re[i]; cIm[i] = -im[i]; }
+  const { re: r } = fft_complex(cRe, cIm);
+  const out = new Float64Array(n);
+  for (let i = 0; i < n; i++) out[i] = r[i] / n;
+  return out;
+}
+
+// ── Ventana Hann ──────────────────────────────────────────────────────
+function hannWindow(n) {
+  const w = new Float64Array(n);
+  for (let i = 0; i < n; i++) w[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (n - 1)));
+  return w;
+}
+
+// ── Curvas de las bandas (ganancia lineal en una frecuencia f) ───────
+// Fuente única: el motor las evalúa en los bins de la FFT y la gráfica en
+// un punto por píxel, así que lo que se dibuja es exactamente lo diseñado.
+
+// High pass: −slope dB/oct por debajo de fc; DC a cero
+function highPassAt(f, fc, slopeDb) {
+  if (f <= 0) return 0;
+  if (f >= fc) return 1;
+  const octavesBelow = Math.log2(fc / f);
+  const db = -(octavesBelow * slopeDb);
+  if (!isFinite(db) || db <= -120) return 0;
+  const g = Math.pow(10, db / 20);
+  return isFinite(g) && g >= 0 ? g : 0;
+}
+
+// Low pass: espejo del high pass, −slope dB/oct por encima de fc
+function lowPassAt(f, fc, slopeDb) {
+  if (f <= fc) return 1;
+  const octavesAbove = Math.log2(f / fc);
+  const db = -(octavesAbove * slopeDb);
+  if (!isFinite(db) || db <= -120) return 0;
+  const g = Math.pow(10, db / 20);
+  return isFinite(g) && g >= 0 ? g : 0;
+}
+
+// Gaussiana en log10(f), σ = log10(2)/(2Q) décadas
+function gaussianAt(f, fc, gainDb, Q) {
+  if (gainDb === 0 || f < 1) return 1;
+  const peak  = Math.pow(10, gainDb / 20);
+  const sigma = (1.0 / Q) * Math.log10(2) / 2.0;
+  const d = Math.log10(f) - Math.log10(fc);
+  return 1.0 + (peak - 1.0) * Math.exp(-(d * d) / (2 * sigma * sigma));
+}
+
+// Low shelf / high shelf — gaussiana asimétrica: plano en la ganancia hacia
+// el extremo y transición gaussiana desde fc hacia 0 dB
+function lowShelfAt(f, fc, gainDb, Q) {
+  if (gainDb === 0 || f < 1) return 1;
+  const peak  = Math.pow(10, gainDb / 20);
+  const sigma = (1.0 / Q) * Math.log10(2) / 2.0;
+  const d = Math.log10(f) - Math.log10(fc);
+  if (d <= 0) return Math.max(0, peak);
+  return Math.max(0, 1.0 + (peak - 1.0) * Math.exp(-(d * d) / (2 * sigma * sigma)));
+}
+function highShelfAt(f, fc, gainDb, Q) {
+  if (gainDb === 0 || f < 1) return 1;
+  const peak  = Math.pow(10, gainDb / 20);
+  const sigma = (1.0 / Q) * Math.log10(2) / 2.0;
+  const d = Math.log10(f) - Math.log10(fc);
+  if (d >= 0) return Math.max(0, peak);
+  return Math.max(0, 1.0 + (peak - 1.0) * Math.exp(-(d * d) / (2 * sigma * sigma)));
+}
+
+// ── Modos de canal ───────────────────────────────────────────────────
+// Roles de canal: 'l', 'r' (etapa 1, dominio L/R) y 'm', 's' (etapa 2, dominio M/S).
+// Las bandas en Estéreo actúan en la etapa 1 sobre L y R por igual.
+function activeSet(b, role) {
+  const g = modeGroup(b.edit);
+  const stage1 = role === 'l' || role === 'r';
+  if (g === 'st') return stage1 ? b.sets.st : null;
+  if (g === 'lr') return stage1 ? b.sets[role] : null;
+  return stage1 ? null : b.sets[role];
+}
+const anyGroup  = g => bands.some(b => modeGroup(b.edit) === g);
+const anyMSBand = () => anyGroup('ms');
+// ¿Tiene efecto un juego?
+function setIsLive(b, p) {
+  if (!p.on) return false;
+  return BAND_TYPES[b.type].slope ? true : p.gain !== 0;
+}
+
+// Ganancia lineal de una banda con un juego concreto, en una frecuencia
+function bandGainAt(type, p, f) {
+  switch (type) {
+    case 'bell': return gaussianAt(f, p.fc, p.gain, p.q);
+    case 'ls':   return lowShelfAt(f, p.fc, p.gain, p.q);
+    case 'hs':   return highShelfAt(f, p.fc, p.gain, p.q);
+    case 'hp':   return highPassAt(f, p.fc, p.slope);
+    case 'lp':   return lowPassAt(f, p.fc, p.slope);
+  }
+  return 1;
+}
+
+// Ganancia lineal total de un rol en una lista de frecuencias
+function responseAt(freqs, role) {
+  const g = new Float64Array(freqs.length).fill(1.0);
+  for (const b of bands) {
+    const p = activeSet(b, role);
+    if (!p || !setIsLive(b, p)) continue;
+    for (let i = 0; i < freqs.length; i++) g[i] *= bandGainAt(b.type, p, freqs[i]);
+  }
+  return g;
+}
+
+// Curva de una sola banda (para dibujar la banda seleccionada)
+function bandResponseAt(b, key, freqs) {
+  const p = b.sets[key], g = new Float64Array(freqs.length).fill(1.0);
+  if (!setIsLive(b, p)) return g;
+  for (let i = 0; i < freqs.length; i++) g[i] = bandGainAt(b.type, p, freqs[i]);
+  return g;
+}
+
+// Ganancias por bin para el motor (bins 0..n/2-1)
+function combineGains(n, sr, role) {
+  const binHz = sr / n;
+  const freqs = new Float64Array(n / 2);
+  for (let k = 0; k < freqs.length; k++) freqs[k] = k * binHz;
+  return responseAt(freqs, role);
+}
+
+// Frecuencias de dibujo: una por píxel, repartidas en log de 20 Hz a 20 kHz
+function plotFreqs() {
+  const n = Math.max(200, Math.round(CHART_W || 800));
+  const lMin = Math.log10(20), lMax = Math.log10(20000);
+  const f = new Float64Array(n);
+  for (let i = 0; i < n; i++) f[i] = Math.pow(10, lMin + (lMax - lMin) * i / (n - 1));
+  return f;
+}
+
+// Respuesta total de un rol (bins 0..n/2-1). Las bandas gaussianas son reales
+// (fase cero), pero se guarda como complejo para que el motor admita en el
+// futuro respuestas con fase sin cambiar el resto del procesado.
+function roleResponse(n, sr, role) {
+  const g = combineGains(n, sr, role);
+  const re = new Float64Array(n/2), im = new Float64Array(n/2);
+  let identity = true;
+  for (let k = 0; k < n/2; k++) {
+    re[k] = g[k];
+    if (identity && g[k] !== 1) identity = false;
+  }
+  return { re, im, identity };
+}
+
+// ── Procesar bloque ───────────────────────────────────────────────────
+// FFT de un bloque enventanado
+function analyzeBlock(block, win) {
+  const n = block.length;
+  const xRe = new Float64Array(n);
+  for (let i = 0; i < n; i++) xRe[i] = block[i] * win[i];
+  return fft_complex(xRe, new Float64Array(n));
+}
+
+// Multiplica en sitio el espectro X por H. Los bins espejo (n-k) se multiplican
+// por el conjugado de H para que la salida siga siendo real (simetría hermítica).
+function applyResponse(X, H) {
+  if (!H || H.identity) return;
+  const n = X.re.length, half = n / 2;
+  for (let k = 0; k < half; k++) {
+    const hr = H.re[k], hi = H.im[k];
+    const xr = X.re[k], xi = X.im[k];
+    X.re[k] = xr*hr - xi*hi;  X.im[k] = xr*hi + xi*hr;
+    if (k > 0) {
+      const yr = X.re[n-k], yi = X.im[n-k];      // × conj(H)
+      X.re[n-k] = yr*hr + yi*hi;  X.im[n-k] = yi*hr - yr*hi;
+    }
+  }
+  // Nyquist: se aplica la magnitud del último bin
+  const hN = Math.hypot(H.re[half-1], H.im[half-1]);
+  X.re[half] *= hN; X.im[half] *= hN;
+}
+
+// IFFT + ventana de síntesis
+function synthesizeBlock(X, win) {
+  const out = ifft_complex(X.re, X.im);
+  for (let i = 0; i < out.length; i++) out[i] *= win[i];
+  return out;
+}
+
+// Procesa un bloque estéreo: etapa 1 (L/R) y, si hace falta, etapa 2 (M/S)
+function processStereoBlock(bL, bR, resp, useMS, win) {
+  const XL = analyzeBlock(bL, win), XR = analyzeBlock(bR, win);
+  applyResponse(XL, resp.l);
+  applyResponse(XR, resp.r);
+  if (useMS) {
+    const n = bL.length;
+    for (let k = 0; k < n; k++) {            // L/R → M/S
+      const lr = XL.re[k], li = XL.im[k], rr = XR.re[k], ri = XR.im[k];
+      XL.re[k] = (lr + rr) * 0.5; XL.im[k] = (li + ri) * 0.5;   // XL ahora es Mid
+      XR.re[k] = (lr - rr) * 0.5; XR.im[k] = (li - ri) * 0.5;   // XR ahora es Side
+    }
+    applyResponse(XL, resp.m);
+    applyResponse(XR, resp.s);
+    for (let k = 0; k < n; k++) {            // M/S → L/R
+      const mr = XL.re[k], mi = XL.im[k], sr_ = XR.re[k], si = XR.im[k];
+      XL.re[k] = mr + sr_; XL.im[k] = mi + si;
+      XR.re[k] = mr - sr_; XR.im[k] = mi - si;
+    }
+  }
+  return [synthesizeBlock(XL, win), synthesizeBlock(XR, win)];
+}
+
+// Procesa un bloque mono: la señal es L en la etapa 1 y Mid en la etapa 2
+function processMonoBlock(b, resp, win) {
+  const X = analyzeBlock(b, win);
+  applyResponse(X, resp.l);
+  applyResponse(X, resp.m);
+  return synthesizeBlock(X, win);
+}
+
+// ── Procesar audio completo (overlap-add) ─────────────────────────────
+async function processAudio() {
+  if (!rawBuffer) return;
+
+  const btn = document.getElementById('process-btn');
+  btn.disabled = true;
+  btn.textContent = 'Procesando...';
+
+  document.getElementById('m2-status').textContent = 'procesando...';
+  document.getElementById('m2-status').className = 'module-status warn';
+
+  await new Promise(r => setTimeout(r, 10));
+
+  const sr        = rawBuffer.sampleRate;
+  const numCh     = rawBuffer.numberOfChannels;
+  const totalLen  = rawBuffer.getChannelData(0).length;
+  const hop       = Math.floor(N * (1 - overlap));
+  const win       = hannWindow(N);
+  // Relleno de silencio al inicio (múltiplo de hop para no mover la rejilla de
+  // bloques). Así la primera muestra real ya está cubierta por todos los bloques
+  // solapados: la normalización es constante desde el principio y no hay click.
+  // (El final ya quedaba cubierto: los bloques llegan hasta pasado el último sample.)
+  const pad       = Math.ceil(N / hop) * hop;
+  const procLen   = pad + totalLen;                 // longitud en coordenadas con relleno
+  const totalBlocks = Math.ceil(procLen / hop);
+
+  // Precalcular normalización overlap-add (igual para todos los canales)
+  const normBuf = new Float64Array(procLen + N);
+  let pos = 0;
+  while (pos < procLen) {
+    for (let i = 0; i < N; i++) normBuf[pos + i] += win[i] * win[i];
+    pos += hop;
+  }
+
+  // Respuestas por rol (se calculan una vez)
+  const resp = {
+    l: roleResponse(N, sr, 'l'), r: roleResponse(N, sr, 'r'),
+    m: roleResponse(N, sr, 'm'), s: roleResponse(N, sr, 's'),
+  };
+  const useMS = anyGroup('ms');
+  const useLR = anyGroup('lr');
+
+  // Grupos a procesar: un par estéreo, o canales sueltos tratados como mono
+  const groups = numCh === 2 ? [[0, 1]] : Array.from({ length: numCh }, (_, c) => [c]);
+  const outputs = Array.from({ length: numCh }, () => new Float64Array(procLen + N));
+  const passes = groups.length;
+
+  for (let gi = 0; gi < passes; gi++) {
+    const chs = groups[gi];
+    const src = chs.map(c => rawBuffer.getChannelData(c));
+    pos = 0;
+    let blockCount = 0;
+    while (pos < procLen) {
+      const blocks = src.map(s => {
+        const b = new Float64Array(N);
+        for (let i = 0; i < N; i++) {
+          const j = pos + i - pad;                  // índice en la señal original
+          if (j >= 0 && j < totalLen) b[i] = s[j];
+        }
+        return b;
+      });
+      const processed = chs.length === 2
+        ? processStereoBlock(blocks[0], blocks[1], resp, useMS, win)
+        : [processMonoBlock(blocks[0], resp, win)];
+      chs.forEach((c, j) => {
+        const o = outputs[c], p = processed[j];
+        for (let i = 0; i < N; i++) o[pos + i] += p[i];
+      });
+      pos += hop;
+      blockCount++;
+      if (blockCount % 20 === 0) {
+        const pct = Math.round(((gi * totalBlocks + blockCount) / (passes * totalBlocks)) * 100);
+        document.getElementById('proc-bar').style.width = pct + '%';
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+  }
+
+  const resultChannels = outputs.map(output => {
+    const result = new Float32Array(totalLen);
+    for (let i = 0; i < totalLen; i++) {
+      const k = i + pad;                            // se descarta el relleno
+      result[i] = normBuf[k] > 1e-6 ? output[k] / normBuf[k] : 0;
+    }
+    return result;
+  });
+
+  processedPCM = resultChannels;
+
+  document.getElementById('proc-bar').style.width = '100%';
+  document.getElementById('m2-status').textContent = 'procesado ✓';
+  document.getElementById('m2-status').className = 'module-status ok';
+  document.getElementById('m3-status').textContent = 'listo para exportar';
+  document.getElementById('m3-status').className = 'module-status ok';
+  document.getElementById('export-btn').disabled = false;
+  document.getElementById('btn-proc').disabled = false;
+  const chLabel = numCh === 1 ? 'Mono' : 'Estéreo';
+  document.getElementById('export-info').innerHTML =
+    `Audio procesado: <span class="ok">${totalLen.toLocaleString()} muestras</span> · ` +
+    `${numCh} canal${numCh>1?'es':''} (${chLabel}) · ${totalBlocks} bloques · overlap ${Math.round(overlap*100)}%` +
+    `${(useLR || useMS) ? ' · etapas: <span class="ok">' + [useLR && 'L/R', useMS && 'M/S'].filter(Boolean).join(' → ') + '</span>' : ''}<br>` +
+    `Listo para descargar como <span class="ok">WAV 32-bit float ${chLabel}</span>.`;
+
+  btn.disabled = false;
+  btn.textContent = 'Procesar audio';
+
+  updateCharts();
+}
+
+// ── Módulo 1: Carga ───────────────────────────────────────────────────
+document.getElementById('file-input').addEventListener('change', function(e) {
+  loadFile(e.target.files[0]);
+});
+
+const dropZone = document.getElementById('drop-zone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+
+async function loadFile(file) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  document.getElementById('m1-status').textContent = 'decodificando...';
+  document.getElementById('load-progress').style.display = 'block';
+  document.getElementById('load-bar').style.width = '30%';
+
+  const arrayBuf = await file.arrayBuffer();
+  document.getElementById('load-bar').style.width = '70%';
+  rawBuffer = await ctx.decodeAudioData(arrayBuf);
+  ctx.close();
+  document.getElementById('load-bar').style.width = '100%';
+
+  const dur = rawBuffer.duration;
+  const mins = Math.floor(dur / 60);
+  const secs = (dur % 60).toFixed(1);
+
+  document.getElementById('ai-name').textContent = file.name.length > 18 ? file.name.slice(0,16)+'…' : file.name;
+  document.getElementById('ai-dur').textContent  = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  document.getElementById('ai-sr').textContent   = rawBuffer.sampleRate + ' Hz';
+  document.getElementById('ai-ch').textContent   = rawBuffer.numberOfChannels === 1 ? 'Mono' : 'Estéreo';
+  document.getElementById('audio-info').style.display = 'grid';
+  dropZone.classList.add('loaded');
+  dropZone.innerHTML = `<div>✓ ${file.name}</div><div style="margin-top:4px;font-size:9px;opacity:0.6">Haz clic para cambiar</div>`;
+
+  document.getElementById('m1-status').textContent = 'cargado ✓';
+  document.getElementById('m1-status').className   = 'module-status ok';
+  document.getElementById('m2-status').textContent = 'listo';
+  document.getElementById('m2-status').className   = 'module-status ok';
+  document.getElementById('process-btn').disabled  = false;
+  document.getElementById('btn-orig').disabled     = false;
+
+  processedPCM = null;
+  document.getElementById('export-btn').disabled = true;
+  document.getElementById('btn-proc').disabled   = true;
+  document.getElementById('m3-status').textContent = 'sin audio procesado';
+  document.getElementById('m3-status').className   = 'module-status';
+
+  updateCharts();
+}
+
+// ── Reproducción ──────────────────────────────────────────────────────
+function getAudioCtx() {
+  if (!audioCtx || audioCtx.state === 'closed') {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: rawBuffer ? rawBuffer.sampleRate : 44100
+    });
+  }
+  return audioCtx;
+}
+
+function stopPlaying() {
+  if (playingNode) { try { playingNode.stop(); } catch(e){} playingNode = null; }
+  document.getElementById('btn-orig').classList.remove('active');
+  document.getElementById('btn-proc').classList.remove('active');
+  document.getElementById('btn-orig').textContent = '▶ Original';
+  document.getElementById('btn-proc').textContent = '▶ Procesado';
+  playingWhich = null;
+}
+
+// channels: array de Float32Array (1 = mono, 2 = estéreo)
+function playBuffer(channels, sr, btnId, label) {
+  if (playingWhich === label) { stopPlaying(); return; }
+  stopPlaying();
+  const ctx = getAudioCtx();
+  const buf = ctx.createBuffer(channels.length, channels[0].length, sr);
+  channels.forEach((data, ch) => buf.getChannelData(ch).set(data));
+  const src = ctx.createBufferSource();
+  src.buffer = buf; src.connect(ctx.destination); src.start();
+  src.onended = () => {
+    document.getElementById(btnId).classList.remove('active');
+    document.getElementById(btnId).textContent = '▶ ' + label;
+    playingWhich = null;
+  };
+  playingNode = src; playingWhich = label;
+  document.getElementById(btnId).classList.add('active');
+  document.getElementById(btnId).textContent = '■ ' + label;
+}
+
+function playOriginal() {
+  if (!rawBuffer) return;
+  const chs = [];
+  for (let ch = 0; ch < rawBuffer.numberOfChannels; ch++) chs.push(rawBuffer.getChannelData(ch));
+  playBuffer(chs, rawBuffer.sampleRate, 'btn-orig', 'Original');
+}
+
+function playProcessed() {
+  if (!processedPCM || !rawBuffer) return;
+  playBuffer(processedPCM, rawBuffer.sampleRate, 'btn-proc', 'Procesado');
+}
+
+// ── Módulo 3: Exportar WAV ────────────────────────────────────────────
+function exportWAV() {
+  if (!processedPCM) return;
+  const sr    = rawBuffer.sampleRate;
+  const numCh = processedPCM.length;
+  const bps   = 4; // 32-bit float
+  const numSamples = processedPCM[0].length;
+  const dataLen = numSamples * numCh * bps;
+  const buf  = new ArrayBuffer(44 + dataLen);
+  const view = new DataView(buf);
+
+  function writeStr(off, str) { for (let i=0;i<str.length;i++) view.setUint8(off+i, str.charCodeAt(i)); }
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataLen, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 3, true); // IEEE float
+  view.setUint16(22, numCh, true);
+  view.setUint32(24, sr, true);
+  view.setUint32(28, sr * numCh * bps, true);
+  view.setUint16(32, numCh * bps, true);
+  view.setUint16(34, 32, true);
+  writeStr(36, 'data');
+  view.setUint32(40, dataLen, true);
+
+  // Interleave canales: L R L R L R ...
+  let offset = 44;
+  for (let i = 0; i < numSamples; i++) {
+    for (let ch = 0; ch < numCh; ch++) {
+      view.setFloat32(offset, processedPCM[ch][i], true);
+      offset += 4;
+    }
+  }
+
+  const blob = new Blob([buf], { type: 'audio/wav' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'eq_resultado.wav'; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+// ── Gráficas ──────────────────────────────────────────────────────────
+// Magnitud lineal de una respuesta
+const respMag = H => {
+  const m = new Float64Array(H.re.length);
+  for (let k = 0; k < m.length; k++) m[k] = Math.hypot(H.re[k], H.im[k]);
+  return m;
+};
+const magToDb = m => m.map(v => v > 1e-10 ? 20 * Math.log10(v) : -120);
+
+function updateCharts() {
+  const sr = rawBuffer ? rawBuffer.sampleRate : SR_INTERNAL;
+  const hasLR = anyGroup('lr'), hasMS = anyGroup('ms');
+
+  const R = { l: roleResponse(N, sr, 'l'), r: roleResponse(N, sr, 'r'),
+              m: roleResponse(N, sr, 'm'), s: roleResponse(N, sr, 's') };
+  const M = { l: respMag(R.l), r: respMag(R.r), m: respMag(R.m), s: respMag(R.s) };
+
+  // Curvas de magnitud: curva de diseño evaluada en un punto por píxel
+  // Estéreo (una sola) · L y R (etapa 1 completa) · Mid y Side
+  // Sin bandas L/R, Mid y Side incluyen también las bandas en Estéreo.
+  // Con bandas L/R y M/S a la vez, Mid y Side muestran solo la etapa M/S.
+  const pf = plotFreqs();
+  const P = { l: responseAt(pf, 'l'), r: responseAt(pf, 'r'),
+              m: responseAt(pf, 'm'), s: responseAt(pf, 's') };
+  const curves = [];
+  if (!hasLR && !hasMS) {
+    curves.push({ f: pf, db: magToDb(P.l), color: '#d9d9e6' });
+  }
+  if (hasLR) {
+    curves.push({ f: pf, db: magToDb(P.l), color: '#f2d24b', label: 'L' });
+    curves.push({ f: pf, db: magToDb(P.r), color: '#ff7aa8', label: 'R', dash: [4,3] });
+  }
+  if (hasMS) {
+    const base = hasLR ? null : P.l;
+    const withBase = m => base ? m.map((v, k) => v * base[k]) : m;
+    curves.push({ f: pf, db: magToDb(withBase(P.m)), color: '#f7a23e', label: hasLR ? 'Mid (M/S)' : 'Mid' });
+    curves.push({ f: pf, db: magToDb(withBase(P.s)), color: '#5bc0eb', label: hasLR ? 'Side (M/S)' : 'Side', dash: [4,3] });
+  }
+
+  // Fase: se comprueba en los cuatro roles (L, R, Mid, Side); se dibuja el
+  // primero que tenga alguna banda activa
+  const roles = ['l', 'r', 'm', 's'];
+  const phaseRole = roles.find(r => !R[r].identity) || 'l';
+
+  // Señal de prueba (dos senos) para la fase antes/después
+  const testSignal = new Float64Array(N);
+  for (let i = 0; i < N; i++) testSignal[i] = Math.sin(2 * Math.PI * i * 7 / N) + Math.sin(2 * Math.PI * i * 13 / N);
+  const X0 = fft_complex(testSignal, new Float64Array(N));
+  const phaseOf = X => { const ph = new Float64Array(N/2);
+    for (let k = 0; k < N/2; k++) ph[k] = Math.atan2(X.im[k], X.re[k]) * 180 / Math.PI; return ph; };
+  const phaseBefore = phaseOf(X0);
+  const binHz = sr / N;
+
+  let maxErr = 0, phaseAfter = null;
+  roles.forEach(r => {
+    const X = { re: X0.re.slice(), im: X0.im.slice() };
+    applyResponse(X, R[r]);
+    const ph = phaseOf(X);
+    if (r === phaseRole) phaseAfter = ph;
+    for (let k = 1; k < N/2; k++) {
+      if (M[r][k] < 0.001) continue;
+      const freq = k * binHz;
+      if (freq < 20 || freq > 20000) continue;
+      let diff = Math.abs(ph[k] - phaseBefore[k]);
+      if (diff > 180) diff = 360 - diff;
+      if (diff > maxErr) maxErr = diff;
+    }
+  });
+  const mag = M[phaseRole];
+
+  const badge = document.getElementById('phase-badge');
+  const rolePrefix = (hasLR || hasMS) ? 'L·R·M·S · ' : '';
+  if (maxErr < 0.01) {
+    badge.textContent = rolePrefix + 'sin desplazamiento ✓';
+    badge.style.color = '#3ecfa3'; badge.style.borderColor = 'rgba(62,207,163,0.3)';
+    badge.style.background = 'rgba(62,207,163,0.12)';
+  } else {
+    badge.textContent = rolePrefix + 'desplazamiento: ' + maxErr.toFixed(3) + '°';
+    badge.style.color = '#f7a23e'; badge.style.borderColor = 'rgba(247,162,62,0.3)';
+    badge.style.background = 'rgba(247,162,62,0.12)';
+  }
+
+  // Curva propia de la banda seleccionada (con el juego que se edita)
+  const sb = selBand();
+  const selCurve = sb ? { f: pf, db: magToDb(bandResponseAt(sb, sb.edit, pf)), color: sb.color, fc: editSet(sb).fc } : null;
+  drawMag(curves, sr, selCurve);
+  drawPhase(phaseBefore, phaseAfter, mag, sr);
+}
+
+// Geometría del gráfico de magnitud (compartida por el dibujo y el ratón)
+const MAG_H = 160, MAG_PAD = {l:40,r:8,t:8,b:24};
+const MAG_DB_MIN = -21, MAG_DB_MAX = 15;
+const MAG_F_MIN = 20, MAG_F_MAX = 20000;
+function magGeom() {
+  const W = CHART_W, H = MAG_H, PAD = MAG_PAD;
+  const pw = W-PAD.l-PAD.r, ph = H-PAD.t-PAD.b;
+  const lMin = Math.log10(MAG_F_MIN), lMax = Math.log10(MAG_F_MAX);
+  const toX = f => f>0 ? PAD.l+(Math.log10(f)-lMin)/(lMax-lMin)*pw : PAD.l;
+  const fromX = x => Math.pow(10, lMin + (x-PAD.l)/pw*(lMax-lMin));
+  const toY = db => {
+    if (!isFinite(db)) db = db < 0 ? MAG_DB_MIN : MAG_DB_MAX;
+    return PAD.t+ph-(Math.max(MAG_DB_MIN,Math.min(MAG_DB_MAX,db))-MAG_DB_MIN)/(MAG_DB_MAX-MAG_DB_MIN)*ph;
+  };
+  const fromY = y => MAG_DB_MIN + (PAD.t+ph-y)/ph*(MAG_DB_MAX-MAG_DB_MIN);
+  return { W, H, PAD, pw, ph, toX, fromX, toY, fromY };
+}
+
+let lastMagCurves = null, lastMagSr = SR_INTERNAL, lastMagSel = null;   // para redibujar solo la magnitud (hover)
+
+function drawMag(curves, sr, sel) {
+  lastMagCurves = curves; lastMagSr = sr; lastMagSel = sel;
+  const canvas = document.getElementById('cMag');
+  const dpr = window.devicePixelRatio || 1;
+  const G = magGeom();
+  const { W, H, PAD, pw, ph, toX, toY } = G;
+  if (canvas.width !== W*dpr || canvas.height !== H*dpr) {
+    canvas.width = W*dpr; canvas.height = H*dpr;
+    canvas.style.width = W+'px'; canvas.style.height = H+'px';
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const binHz = sr / N;
+
+  ctx.clearRect(0,0,W,H);
+  [-18,-12,-6,0,6,12].forEach(db => {
+    const y = toY(db);
+    ctx.beginPath(); ctx.strokeStyle = db===0?'rgba(255,255,255,0.15)':'rgba(255,255,255,0.05)';
+    ctx.lineWidth = db===0?1:0.5; ctx.moveTo(PAD.l,y); ctx.lineTo(W-PAD.r,y); ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.font='9px monospace'; ctx.textAlign='right';
+    ctx.fillText((db>0?'+':'')+db+'dB', PAD.l-3, y+3);
+  });
+  [20,100,500,1000,5000,10000,20000].forEach(f => {
+    const x = toX(f);
+    ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,0.05)'; ctx.lineWidth=0.5;
+    ctx.moveTo(x,PAD.t); ctx.lineTo(x,H-PAD.b); ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.font='9px monospace'; ctx.textAlign='center';
+    ctx.fillText(f>=1000?(f/1000)+'k':f, x, H-PAD.b+12);
+  });
+  const zY = toY(0);
+
+  const anyActive = curves.some(c => c.db.some(v => Math.abs(v) > 0.001));
+
+  if (anyActive) {
+    const hexA = (hex, a) => {
+      const n = parseInt(hex.slice(1), 16);
+      return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+    };
+    curves.forEach((c, ci) => {
+      const curve = c.db;
+      // Relleno (más suave si hay dos curvas)
+      ctx.beginPath(); let s=false;
+      for (let k=0;k<curve.length;k++) {
+        const f=c.f[k]; if(f<20||f>20000) continue;
+        if (!isFinite(curve[k])) continue;
+        const x=toX(f), y=toY(curve[k]);
+        if(!s){ctx.moveTo(x,zY);ctx.lineTo(x,y);s=true;}else ctx.lineTo(x,y);
+      }
+      ctx.lineTo(toX(20000),zY); ctx.closePath();
+      ctx.fillStyle = hexA(c.color, curves.length > 1 ? 0.08 : 0.15); ctx.fill();
+
+      // Línea curva
+      ctx.beginPath(); s=false;
+      for (let k=0;k<curve.length;k++) {
+        const f=c.f[k]; if(f<20||f>20000) continue;
+        if (!isFinite(curve[k])) continue;
+        const x=toX(f), y=toY(curve[k]);
+        if(!s){ctx.moveTo(x,y);s=true;}else ctx.lineTo(x,y);
+      }
+      ctx.strokeStyle=c.color; ctx.lineWidth=2; ctx.lineJoin='round';
+      ctx.setLineDash(c.dash || []); ctx.stroke(); ctx.setLineDash([]);
+
+      // Leyenda
+      if (c.label) {
+        const step = 70, lx = W - PAD.r - curves.length * step + ci * step, ly = PAD.t + 8;
+        ctx.strokeStyle=c.color; ctx.lineWidth=1.5; ctx.setLineDash(c.dash || []);
+        ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(lx+14,ly); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle=c.color; ctx.font='9px monospace'; ctx.textAlign='left';
+        ctx.fillText(c.label, lx+18, ly+3);
+      }
+    });
+
+  } else {
+    ctx.beginPath(); ctx.moveTo(PAD.l,zY); ctx.lineTo(W-PAD.r,zY);
+    ctx.strokeStyle='rgba(255,255,255,0.15)'; ctx.lineWidth=1; ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.font='9px monospace'; ctx.textAlign='center';
+    ctx.fillText(bands.length ? 'sin efecto' : 'doble clic para crear un punto · clic derecho para elegir el tipo', PAD.l+pw/2, zY+14);
+  }
+
+  // Banda seleccionada: su curva propia (punteada) y marcador de frecuencia
+  if (sel) {
+    ctx.beginPath(); let s = false;
+    for (let k = 0; k < sel.db.length; k++) {
+      const f = sel.f[k]; if (f < 20 || f > 20000) continue;
+      const x = toX(f), y = toY(sel.db[k]);
+      if (!s) { ctx.moveTo(x, y); s = true; } else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = sel.color; ctx.lineWidth = 1.2; ctx.globalAlpha = 0.7;
+    ctx.setLineDash([2,2]); ctx.stroke(); ctx.setLineDash([]);
+    const fcX = toX(sel.fc);
+    ctx.beginPath(); ctx.lineWidth = 0.5; ctx.globalAlpha = 0.35;
+    ctx.setLineDash([3,3]); ctx.moveTo(fcX, PAD.t); ctx.lineTo(fcX, H-PAD.b); ctx.stroke(); ctx.setLineDash([]);
+    ctx.globalAlpha = 0.8; ctx.fillStyle = sel.color; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(fmtFreq(sel.fc), Math.max(PAD.l+22, Math.min(W-PAD.r-26, fcX)), PAD.t+10);
+    ctx.globalAlpha = 1;
+  }
+
+  drawHandles(ctx, G);
+}
+
+// Rango del factor Q (slider logarítmico, 2 decimales)
+const Q_RANGE = { min: 0.1, max: 10, steps: 1000 };
+const roundQ = q => Math.round(q * 100) / 100;
+
+// ── Puntos en la gráfica de magnitud ─────────────────────────────────
+// Cada banda tiene su punto (forma según el tipo: ● campana · ◆ shelf · ■ filtro).
+// Arrastrar: frecuencia ↔ (y ganancia ↕ si el tipo la tiene).
+// Mayúsculas durante el arrastre: ↕ cambia Q (campana/shelf) o pendiente (filtros).
+// Alt (⌥): ajuste fino. Doble clic en vacío: crea un punto. Clic derecho: menú.
+const ROLE_LABELS = { st:'', l:'L', r:'R', m:'M', s:'S' };
+const EQ_GAIN_MIN = -20, EQ_GAIN_MAX = 12, EQ_Q_MIN = Q_RANGE.min, EQ_Q_MAX = Q_RANGE.max;
+const HANDLE_R = 6, HANDLE_HIT = 11;
+
+let handleHover = null;   // { band (id), key } bajo el ratón
+let handleDrag  = null;   // arrastre en curso: { band, key, mode, x0, y0, fc0, gain0, q0, slopeIdx0, fine }
+// Modos de arrastre (siguen a la tecla Mayúsculas en tiempo real):
+//   'move'  → frecuencia ↔ (y ganancia ↕ si el tipo la tiene)
+//   'shape' → con Mayúsculas pulsada, arrastrar ↕: Q o pendiente
+// Al pulsar o soltar Mayúsculas (o Alt) a mitad del arrastre, el movimiento
+// continúa desde la posición actual, sin saltos. Alt (⌥): ajuste fino (×0.2)
+const Q_DRAG_PX_PER_X4 = 100;   // px de arrastre para multiplicar la Q por 4
+const SLOPE_DRAG_PX    = 25;    // px de arrastre por paso de pendiente
+const sameHandle = (a, b) => a && b && a.band === b.band && a.key === b.key;
+
+function bandInfo(b, p) {
+  const t = BAND_TYPES[b.type];
+  const head = `${bandIndex(b)} · ${t.short}`;
+  if (t.slope) return `${head} · ${fmtFreq(p.fc)} · ${p.slope} dB/oct`;
+  return `${head} · ${fmtFreq(p.fc)} · ${fmtGain(p.gain)} · Q ${p.q.toFixed(2)}`;
+}
+
+// Puntos visibles. De las bandas no seleccionadas solo el juego editado; de la
+// seleccionada también su hermano en L/R o M/S. La seleccionada va encima.
+function allHandles(G) {
+  const out = [];
+  const ordered = bands.filter(b => b.id !== selectedId);
+  const sel = selBand(); if (sel) ordered.push(sel);
+  ordered.forEach(b => {
+    const t = BAND_TYPES[b.type], g = modeGroup(b.edit), keys = [b.edit];
+    if (b.id === selectedId && g !== 'st')
+      keys.unshift(g === 'lr' ? (b.edit === 'l' ? 'r' : 'l') : (b.edit === 'm' ? 's' : 'm'));
+    keys.forEach(k => {
+      const p = b.sets[k];
+      out.push({ band: b.id, b, key: k, p, x: G.toX(p.fc), y: G.toY(t.gain ? p.gain : 0),
+                 editing: k === b.edit, selected: b.id === selectedId });
+    });
+  });
+  return out;
+}
+
+function handlePath(ctx, shape, x, y, r) {
+  ctx.beginPath();
+  if (shape === 'square') ctx.roundRect(x - r, y - r, 2*r, 2*r, 2);
+  else if (shape === 'diamond') { const d = r * 1.3; ctx.moveTo(x, y-d); ctx.lineTo(x+d, y); ctx.lineTo(x, y+d); ctx.lineTo(x-d, y); ctx.closePath(); }
+  else ctx.arc(x, y, r, 0, Math.PI*2);
+}
+
+function drawHandles(ctx, G) {
+  allHandles(G).forEach(h => {
+    const col = h.b.color, shape = BAND_TYPES[h.b.type].shape;
+    const hot = sameHandle(handleHover, h) || sameHandle(handleDrag, h);
+    const r = hot ? HANDLE_R + 2 : HANDLE_R;
+    ctx.globalAlpha = h.p.on ? 1 : 0.4;                    // banda apagada: atenuada
+    // Anillo de selección
+    if (h.selected && h.editing) {
+      handlePath(ctx, shape, h.x, h.y, r + 4);
+      ctx.lineWidth = 1; ctx.strokeStyle = col; ctx.globalAlpha *= 0.5; ctx.stroke();
+      ctx.globalAlpha = h.p.on ? 1 : 0.4;
+    }
+    handlePath(ctx, shape, h.x, h.y, r);
+    if (h.editing) {
+      ctx.fillStyle = col; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = '#0e0e10'; ctx.stroke();
+    } else {
+      ctx.fillStyle = 'rgba(14,14,16,0.8)'; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = col; ctx.globalAlpha *= 0.6; ctx.stroke();
+    }
+    ctx.globalAlpha = h.p.on ? 1 : 0.4;
+    const lbl = ROLE_LABELS[h.key] || String(bandIndex(h.b));
+    ctx.fillStyle = h.editing ? '#0e0e10' : col;
+    ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(lbl, h.x, h.y + 3);
+    ctx.globalAlpha = 1;
+    // Lectura de valores al pasar por encima o arrastrar
+    if (hot) {
+      const txt = bandInfo(h.b, h.p) + (h.p.on ? '' : ' · apagada');
+      ctx.font = '9px monospace';
+      const tw = ctx.measureText(txt).width + 10;
+      let tx = h.x - tw/2, ty = h.y - r - 20;
+      if (ty < G.PAD.t) ty = h.y + r + 6;
+      tx = Math.max(G.PAD.l, Math.min(G.W - G.PAD.r - tw, tx));
+      ctx.fillStyle = 'rgba(14,14,16,0.92)'; ctx.fillRect(tx, ty, tw, 14);
+      ctx.strokeStyle = col; ctx.lineWidth = 0.5; ctx.strokeRect(tx, ty, tw, 14);
+      ctx.fillStyle = col; ctx.textAlign = 'left';
+      ctx.fillText(txt, tx + 5, ty + 10);
+    }
+  });
+}
+
+function canvasPos(e) {
+  const r = document.getElementById('cMag').getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+// Punto bajo (x,y): prioridad al que se dibuja encima
+function hitHandle(x, y) {
+  const hs = allHandles(magGeom()).reverse();
+  const h = hs.find(h => Math.hypot(h.x - x, h.y - y) <= HANDLE_HIT);
+  return h ? { band: h.band, key: h.key } : null;
+}
+
+let handleRaf = 0;
+function scheduleBandUpdate() {
+  if (handleRaf) return;
+  handleRaf = requestAnimationFrame(() => { handleRaf = 0; syncPanel(); updateCharts(); });
+}
+function redrawMagOnly() { if (lastMagCurves) drawMag(lastMagCurves, lastMagSr, lastMagSel); }
+
+// Seleccionar la banda del punto y, si es de otro canal, pasar a editarlo
+function focusHandle(h) {
+  selectedId = h.band;
+  const b = bandById(h.band);
+  if (h.key !== b.edit) setBandMode(h.key);
+}
+
+// Toma como punto de partida la posición y los valores actuales del arrastre
+function rebaseDrag(x, y, fine) {
+  const d = handleDrag, p = editSet(bandById(d.band));
+  Object.assign(d, { x0: x, y0: y, fc0: p.fc, gain0: p.gain, q0: p.q, fine,
+                     slopeIdx0: SLOPES.indexOf(p.slope) });
+}
+// Si cambió Mayúsculas (modo) o Alt (fino), rebase desde (x, y)
+function updateDragModifiers(x, y, shift, alt) {
+  const d = handleDrag;
+  if (!d) return;
+  d.lastX = x; d.lastY = y;
+  const mode = shift ? 'shape' : 'move';
+  if (mode === d.mode && alt === d.fine) return;
+  d.mode = mode;
+  rebaseDrag(x, y, alt);
+  dragCursor();
+}
+function dragCursor() {
+  const cv = document.getElementById('cMag');
+  cv.style.cursor = !handleDrag ? 'default' : handleDrag.mode === 'shape' ? 'ns-resize' : 'grabbing';
+}
+// Pulsar/soltar Mayúsculas o Alt sin mover el ratón también cambia el modo al instante
+['keydown', 'keyup'].forEach(t => window.addEventListener(t, e => {
+  if (!handleDrag || (e.key !== 'Shift' && e.key !== 'Alt')) return;
+  const d = handleDrag;
+  updateDragModifiers(d.lastX ?? d.x0, d.lastY ?? d.y0, e.shiftKey, e.altKey);
+  if (e.key === 'Alt') e.preventDefault();
+}));
+
+// ── Crear / eliminar / cambiar tipo ──────────────────────────────────
+function createBandAt(type, x, y) {
+  if (bands.length >= MAX_BANDS) { flashBandCount(); return null; }
+  const G = magGeom();
+  const fc = Math.min(MAG_F_MAX, Math.max(MAG_F_MIN, G.fromX(x)));
+  const params = { fc };
+  if (BAND_TYPES[type].gain)
+    params.gain = Math.round(Math.min(EQ_GAIN_MAX, Math.max(EQ_GAIN_MIN, G.fromY(y))) * 10) / 10;
+  const b = makeBand(type, params);
+  bands.push(b);
+  selectedId = b.id;
+  syncPanel(); updateCharts();
+  return b;
+}
+function deleteBand(id) {
+  const i = bands.findIndex(b => b.id === id);
+  if (i < 0) return;
+  bands.splice(i, 1);
+  if (selectedId === id) selectedId = bands.length ? bands[Math.min(i, bands.length - 1)].id : null;
+  handleHover = null;
+  syncPanel(); updateCharts();
+}
+function setBandType(id, type) {
+  const b = bandById(id);
+  if (!b || b.type === type) return;
+  const oldT = b.type, toFilter = BAND_TYPES[type].slope;
+  // Los juegos que no tenían efecto siguen sin tenerlo con el tipo nuevo
+  Object.entries(b.sets).forEach(([k, p]) => {
+    if (k === b.edit || k === 'st') return;
+    if (!setIsLive({ type: oldT }, p)) { p.on = !toFilter; p.gain = 0; }
+  });
+  if (!BAND_TYPES[type].gain) Object.values(b.sets).forEach(p => { p.gain = 0; });
+  b.type = type;
+  syncPanel(); updateCharts();
+}
+
+// ── Menú contextual (clic derecho) ───────────────────────────────────
+function closeCtxMenu() { document.getElementById('ctx-menu').style.display = 'none'; }
+function openCtxMenu(clientX, clientY, items) {
+  const m = document.getElementById('ctx-menu');
+  m.innerHTML = '';
+  items.forEach(it => {
+    const el = document.createElement('div');
+    if (it.sep)        el.className = 'ctx-sep';
+    else if (it.title) { el.className = 'ctx-title'; el.textContent = it.title; }
+    else {
+      el.className = 'ctx-item' + (it.active ? ' active' : '') + (it.danger ? ' danger' : '');
+      el.innerHTML = `<span>${it.label}</span><span style="color:var(--muted)">${it.hint || ''}</span>`;
+      el.addEventListener('click', ev => { ev.stopPropagation(); closeCtxMenu(); it.action(); });
+    }
+    m.appendChild(el);
+  });
+  m.style.display = 'block';
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.min(clientX, window.innerWidth  - r.width  - 4) + 'px';
+  m.style.top  = Math.min(clientY, window.innerHeight - r.height - 4) + 'px';
+}
+window.addEventListener('pointerdown', e => {
+  if (!document.getElementById('ctx-menu').contains(e.target)) closeCtxMenu();
+});
+
+let wheelAccum = 0;       // acumulador para cambiar la pendiente a pasos con trackpad
+
+function initHandleEvents() {
+  const cv = document.getElementById('cMag');
+
+  cv.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    const { x, y } = canvasPos(e);
+    const h = hitHandle(x, y);
+    if (!h) {                                   // clic en vacío: deseleccionar
+      if (selectedId !== null) { selectedId = null; syncPanel(); updateCharts(); }
+      return;
+    }
+    focusHandle(h);
+    handleDrag = { ...h, mode: e.shiftKey ? 'shape' : 'move' };
+    rebaseDrag(x, y, e.altKey);
+    cv.setPointerCapture(e.pointerId);
+    dragCursor();
+    syncPanel(); updateCharts();
+    e.preventDefault();
+  });
+
+  cv.addEventListener('pointermove', e => {
+    const { x, y } = canvasPos(e);
+    if (handleDrag) {
+      const d = handleDrag, b = bandById(d.band), t = BAND_TYPES[b.type], p = editSet(b);
+      updateDragModifiers(x, y, e.shiftKey, e.altKey);       // Mayús/Alt cambiados: rebase
+      const fine = d.fine ? 0.2 : 1;                         // Alt: ajuste fino
+      if (d.mode === 'shape') {
+        const up = -(y - d.y0) * fine;                       // px hacia arriba
+        if (t.q) {
+          const q = d.q0 * Math.pow(4, up / Q_DRAG_PX_PER_X4);
+          p.q = roundQ(Math.min(EQ_Q_MAX, Math.max(EQ_Q_MIN, q)));
+        } else if (t.slope) {
+          const i = Math.min(SLOPES.length - 1, Math.max(0, d.slopeIdx0 + Math.round(up / SLOPE_DRAG_PX)));
+          p.slope = SLOPES[i];
+        }
+      } else {
+        const G = magGeom();
+        const lMin = Math.log10(MAG_F_MIN), lMax = Math.log10(MAG_F_MAX);
+        const dLog = (x - d.x0) / G.pw * (lMax - lMin) * fine;
+        p.fc = Math.min(MAG_F_MAX, Math.max(MAG_F_MIN, d.fc0 * Math.pow(10, dLog)));
+        if (t.gain) {
+          const dDb = -(y - d.y0) / G.ph * (MAG_DB_MAX - MAG_DB_MIN) * fine;
+          p.gain = Math.round(Math.min(EQ_GAIN_MAX, Math.max(EQ_GAIN_MIN, d.gain0 + dDb)) * 10) / 10;
+        }
+      }
+      markEdited(b);
+      scheduleBandUpdate();
+      return;
+    }
+    const h = hitHandle(x, y);
+    cv.style.cursor = h ? 'grab' : 'default';
+    if (!sameHandle(h, handleHover) && (h || handleHover)) { handleHover = h; redrawMagOnly(); }
+  });
+
+  const endDrag = e => {
+    if (!handleDrag) return;
+    handleDrag = null;
+    try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
+    const { x, y } = canvasPos(e);
+    handleHover = hitHandle(x, y);
+    cv.style.cursor = handleHover ? 'grab' : 'default';
+    syncPanel(); updateCharts();
+  };
+  cv.addEventListener('pointerup', endDrag);
+  cv.addEventListener('pointercancel', endDrag);
+  cv.addEventListener('pointerleave', () => {
+    if (!handleDrag && handleHover) { handleHover = null; cv.style.cursor = 'default'; redrawMagOnly(); }
+  });
+
+  // Doble clic: en un punto con ganancia → 0 dB · en vacío → crear punto
+  cv.addEventListener('dblclick', e => {
+    const { x, y } = canvasPos(e);
+    const h = hitHandle(x, y);
+    if (h) {
+      const b = bandById(h.band);
+      if (!BAND_TYPES[b.type].gain) return;
+      b.sets[h.key].gain = 0;
+      markEdited(b); syncPanel(); updateCharts();
+      return;
+    }
+    createBandAt(newBandType, x, y);
+  });
+
+  // Clic derecho: menú para crear con tipo, o para cambiar tipo / eliminar
+  cv.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    const { x, y } = canvasPos(e);
+    const h = hitHandle(x, y);
+    if (h) {
+      focusHandle(h); syncPanel(); updateCharts();
+      const b = bandById(h.band);
+      openCtxMenu(e.clientX, e.clientY, [
+        { title: `Banda ${bandIndex(b)} · tipo` },
+        ...TYPE_ORDER.map(t => ({ label: BAND_TYPES[t].label, active: b.type === t, action: () => setBandType(b.id, t) })),
+        { sep: true },
+        { label: editSet(b).on ? 'Apagar' : 'Encender', action: () => { editSet(b).on = !editSet(b).on; markEdited(b); syncPanel(); updateCharts(); } },
+        { label: 'Eliminar', hint: 'Supr', danger: true, action: () => deleteBand(b.id) },
+      ]);
+    } else {
+      const full = bands.length >= MAX_BANDS;
+      openCtxMenu(e.clientX, e.clientY, [
+        { title: full ? `Máximo ${MAX_BANDS} bandas` : `Crear en ${fmtFreq(Math.min(MAG_F_MAX, Math.max(MAG_F_MIN, magGeom().fromX(x))))}` },
+        ...(full ? [] : TYPE_ORDER.map(t => ({ label: BAND_TYPES[t].label, active: newBandType === t,
+                                              action: () => createBandAt(t, x, y) }))),
+      ]);
+    }
+  });
+
+  // Rueda sobre un punto: Q en campana/shelf, pendiente en los filtros
+  cv.addEventListener('wheel', e => {
+    const { x, y } = canvasPos(e);
+    const h = handleDrag ? { band: handleDrag.band, key: handleDrag.key } : hitHandle(x, y);
+    if (!h) return;
+    e.preventDefault();
+    focusHandle(h);
+    const b = bandById(h.band), t = BAND_TYPES[b.type], p = editSet(b);
+    if (t.q) {
+      const factor = Math.pow(1.06, e.altKey ? 0.25 : 1);
+      p.q = roundQ(Math.min(EQ_Q_MAX, Math.max(EQ_Q_MIN, e.deltaY < 0 ? p.q * factor : p.q / factor)));
+    } else {
+      // Pendiente a pasos (6/12/24/48): un paso cada ~1 "clic" de rueda
+      wheelAccum += e.deltaY;
+      if (Math.abs(wheelAccum) < 40) return;
+      const i = SLOPES.indexOf(p.slope);
+      const ni = Math.min(SLOPES.length - 1, Math.max(0, i + (wheelAccum < 0 ? 1 : -1)));
+      wheelAccum = 0;
+      if (ni === i) return;
+      p.slope = SLOPES[ni];
+    }
+    handleHover = h;
+    markEdited(b); scheduleBandUpdate();
+  }, { passive: false });
+
+  // Supr / Retroceso: eliminar la banda seleccionada
+  window.addEventListener('keydown', e => {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    const tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (tag === 'INPUT' && document.activeElement.type !== 'range') return;
+    if (selectedId === null) return;
+    e.preventDefault();
+    deleteBand(selectedId);
+  });
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') closeCtxMenu(); });
+}
+
+function drawPhase(phaseBefore, phaseAfter, gains, sr) {
+  const canvas = document.getElementById('cPhase');
+  const dpr = window.devicePixelRatio || 1;
+  const W = CHART_W;
+  const H = 130;
+  if (canvas.width !== W*dpr || canvas.height !== H*dpr) {
+    canvas.width = W*dpr; canvas.height = H*dpr;
+    canvas.style.width = W+'px'; canvas.style.height = H+'px';
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const PAD = {l:40,r:8,t:8,b:24};
+  const pw = W-PAD.l-PAD.r, ph = H-PAD.t-PAD.b;
+  const fMin = Math.log10(20), fMax = Math.log10(20000);
+  const binHz = sr / N;
+
+  ctx.clearRect(0,0,W,H);
+
+  [-180,-90,0,90,180].forEach(deg => {
+    const y = PAD.t + ph/2 - deg/180*(ph/2);
+    ctx.beginPath(); ctx.strokeStyle = deg===0?'rgba(255,255,255,0.15)':'rgba(255,255,255,0.05)';
+    ctx.lineWidth = deg===0?1:0.5; ctx.moveTo(PAD.l,y); ctx.lineTo(W-PAD.r,y); ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.font='9px monospace'; ctx.textAlign='right';
+    ctx.fillText(deg+'°', PAD.l-3, y+3);
+  });
+
+  [20,100,500,1000,5000,10000,20000].forEach(f => {
+    const x = PAD.l+(Math.log10(f)-fMin)/(fMax-fMin)*pw;
+    ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,0.05)'; ctx.lineWidth=0.5;
+    ctx.moveTo(x,PAD.t); ctx.lineTo(x,H-PAD.b); ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.font='9px monospace'; ctx.textAlign='center';
+    ctx.fillText(f>=1000?(f/1000)+'k':f, x, H-PAD.b+12);
+  });
+
+  const midY = PAD.t + ph/2;
+
+  const toYp = deg => {
+    return PAD.t + ph - (Math.max(-180, Math.min(180, deg)) + 180) / 360 * ph;
+  };
+
+  // Línea 0° de referencia
+  ctx.beginPath(); ctx.moveTo(PAD.l, midY); ctx.lineTo(W-PAD.r, midY);
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 0.5; ctx.stroke();
+
+  // Fase antes (morado)
+  ctx.beginPath(); let s=false;
+  for (let k=1; k<phaseBefore.length; k++) {
+    const freq = k*binHz; if(freq<20||freq>20000) continue;
+    const x = PAD.l+(Math.log10(freq)-fMin)/(fMax-fMin)*pw;
+    const y = toYp(phaseBefore[k]);
+    if(!s){ctx.moveTo(x,y);s=true;}else ctx.lineTo(x,y);
+  }
+  ctx.strokeStyle='#7c6af7'; ctx.lineWidth=1.5; ctx.lineJoin='round'; ctx.stroke();
+
+  // Fase después (naranja punteado)
+  ctx.beginPath(); s=false;
+  for (let k=1; k<phaseAfter.length; k++) {
+    const freq = k*binHz; if(freq<20||freq>20000) continue;
+    if(gains[k]<0.001) continue;
+    const x = PAD.l+(Math.log10(freq)-fMin)/(fMax-fMin)*pw;
+    const y = toYp(phaseAfter[k]);
+    if(!s){ctx.moveTo(x,y);s=true;}else ctx.lineTo(x,y);
+  }
+  ctx.strokeStyle='#f7a23e'; ctx.lineWidth=1.5; ctx.setLineDash([4,3]); ctx.lineJoin='round'; ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Leyenda
+  ctx.font='9px monospace'; ctx.textAlign='left';
+  ctx.strokeStyle='#7c6af7'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(PAD.l+8,PAD.t+8); ctx.lineTo(PAD.l+22,PAD.t+8); ctx.stroke();
+  ctx.fillStyle='#7c6af7'; ctx.fillText('antes EQ', PAD.l+26, PAD.t+11);
+  ctx.strokeStyle='#f7a23e'; ctx.lineWidth=1.5; ctx.setLineDash([4,3]);
+  ctx.beginPath(); ctx.moveTo(PAD.l+90,PAD.t+8); ctx.lineTo(PAD.l+104,PAD.t+8); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='#f7a23e'; ctx.fillText('después EQ', PAD.l+108, PAD.t+11);
+
+  const sb = selBand();
+  if (sb) {
+    const fc = editSet(sb).fc;
+    const fcX = PAD.l+(Math.log10(fc)-fMin)/(fMax-fMin)*pw;
+    ctx.beginPath(); ctx.strokeStyle = sb.color; ctx.globalAlpha = 0.35; ctx.lineWidth=0.5;
+    ctx.setLineDash([3,3]); ctx.moveTo(fcX,PAD.t); ctx.lineTo(fcX,H-PAD.b); ctx.stroke(); ctx.setLineDash([]);
+    ctx.globalAlpha = 0.8; ctx.fillStyle = sb.color; ctx.font='9px monospace'; ctx.textAlign='center';
+    ctx.fillText(fmtFreq(fc), fcX, PAD.t+10); ctx.globalAlpha = 1;
+  }
+}
+
+// ── Sliders ───────────────────────────────────────────────────────────
+// Ancho fijo de los canvas — se calcula una vez al cargar
+let CHART_W = 0;
+function initChartWidth() {
+  const c = document.getElementById('cMag');
+  CHART_W = Math.floor(c.parentElement.getBoundingClientRect().width) - 20;
+}
+
+document.getElementById('sl-n').addEventListener('input', function() {
+  N = N_OPTIONS[parseInt(this.value)];
+  document.getElementById('lbl-n').textContent = N_LABELS[parseInt(this.value)];
+  updateCharts();
+});
+document.getElementById('sl-ov').addEventListener('input', function() {
+  overlap = OV_OPTIONS[parseInt(this.value)];
+  document.getElementById('lbl-ov').textContent = OV_LABELS[parseInt(this.value)];
+});
+
+
+// ── Panel de bandas ──────────────────────────────────────────────────
+// Cada control lee/escribe en el juego que se está editando de la banda seleccionada.
+const fmtGain = v => (v>0?'+':'') + v.toFixed(1) + ' dB';
+const fmtFreq = f => f >= 1000 ? (f/1000).toFixed(f >= 10000 ? 1 : 2) + ' kHz'
+                               : f.toFixed(f < 100 ? 1 : 0) + ' Hz';
+// Slider logarítmico: posición 0..steps ↔ min..max
+const logToFreq = (v, L) => L.min * Math.pow(L.max / L.min, v / L.steps);
+const freqToLog = (f, L) => Math.round(L.steps * Math.log(f / L.min) / Math.log(L.max / L.min));
+const FC_RANGE = { min: 20, max: 20000, steps: 1000 };
+const $id = id => document.getElementById(id);
+
+// Editar L o R fija sus valores: ya no se recopian de Estéreo
+function markEdited(b) {
+  if (b && modeGroup(b.edit) === 'lr') b.lrFresh = false;
+}
+
+// Estéreo → juego compartido · L o R → modo L/R · M o S → modo M/S
+// (en L/R y M/S suenan los dos canales; el botón elige cuál se edita)
+function setBandMode(mode) {
+  const b = selBand();
+  if (!b) return;
+  // Al entrar en L/R, L y R parten de Estéreo si todavía no se han editado
+  if (modeGroup(mode) === 'lr' && modeGroup(b.edit) !== 'lr' && b.lrFresh) {
+    b.sets.l = { ...b.sets.st };
+    b.sets.r = { ...b.sets.st };
+  }
+  b.edit = mode;
+  syncPanel(); updateCharts();
+}
+
+function setNewType(t) {
+  newBandType = t;
+  TYPE_ORDER.forEach(k => $id('nt-' + k).classList.toggle('ms-active', k === t));
+}
+
+function flashBandCount() {
+  const el = $id('band-count');
+  el.textContent = `máx. ${MAX_BANDS}`; el.style.color = '#ff6464';
+  setTimeout(() => syncPanel(), 900);
+}
+
+// Vuelca el estado en el panel: lista de bandas y controles de la seleccionada
+function syncPanel() {
+  const cnt = $id('band-count');
+  cnt.textContent = `${bands.length} / ${MAX_BANDS}`; cnt.style.color = '';
+
+  // Lista de bandas
+  const chips = $id('band-chips');
+  chips.innerHTML = '';
+  bands.forEach(b => {
+    const c = document.createElement('button');
+    const live = Object.entries(b.sets).some(([k, p]) => activeSetKeys(b).includes(k) && p.on);
+    c.className = 'band-chip' + (b.id === selectedId ? ' sel' : '') + (live ? '' : ' off');
+    c.innerHTML = `<span class="dot" style="background:${b.color}"></span>${bandIndex(b)} ${BAND_TYPES[b.type].short}` +
+                  (b.edit !== 'st' ? ` <span style="opacity:.6">${modeGroup(b.edit) === 'lr' ? 'L/R' : 'M/S'}</span>` : '');
+    c.title = 'Seleccionar banda';
+    c.addEventListener('click', () => { selectedId = b.id; syncPanel(); updateCharts(); });
+    chips.appendChild(c);
+  });
+
+  const b = selBand();
+  $id('band-empty').style.display = b ? 'none' : 'block';
+  $id('band-ctrls').style.display = b ? 'block' : 'none';
+  if (!b) return;
+
+  const t = BAND_TYPES[b.type], p = editSet(b);
+  const box = $id('band-ctrls');
+  box.style.setProperty('--band-color', b.color);
+  box.style.borderColor = b.color + '55';
+  box.style.background  = b.color + '0d';
+  $id('bp-swatch').style.background = b.color;
+  $id('bp-name').textContent = `Banda ${bandIndex(b)} · ${t.label}`;
+  $id('bp-on').checked = p.on;
+  $id('bp-controls').style.opacity = p.on ? '1' : '0.35';
+
+  TYPE_ORDER.forEach(k => $id('bpt-' + k).classList.toggle('ms-active', k === b.type));
+  ['st','l','r','m','s'].forEach(m => {
+    const btn = $id('bp-' + m);
+    btn.classList.toggle('ms-active', m === b.edit);
+    const live = m !== b.edit && m !== 'st' && modeGroup(m) === modeGroup(b.edit) && setIsLive(b, b.sets[m]);
+    btn.classList.toggle('ms-live', live);
+  });
+
+  $id('sl-bpfc').value = freqToLog(p.fc, FC_RANGE);
+  $id('lbl-bpfc').textContent = fmtFreq(p.fc);
+  $id('bp-gain-row').style.display  = t.gain  ? '' : 'none';
+  $id('bp-q-row').style.display     = t.q     ? '' : 'none';
+  $id('bp-slope-row').style.display = t.slope ? '' : 'none';
+  if (t.gain) { $id('sl-bpgain').value = p.gain; $id('lbl-bpgain').textContent = fmtGain(p.gain); }
+  if (t.q) {
+    // Solo se recoloca el slider si su posición no corresponde ya a esta Q
+    const sl = $id('sl-bpq');
+    if (roundQ(logToFreq(parseFloat(sl.value), Q_RANGE)) !== p.q) sl.value = freqToLog(p.q, Q_RANGE);
+    $id('lbl-bpq').textContent = p.q.toFixed(2);
+  }
+  if (t.slope) { $id('sl-bpslope').value = SLOPES.indexOf(p.slope); $id('lbl-bpslope').textContent = p.slope + ' dB/oct'; }
+}
+// Juegos que suenan según el modo de la banda
+const activeSetKeys = b => ({ st: ['st'], lr: ['l','r'], ms: ['m','s'] })[modeGroup(b.edit)];
+
+function initPanel() {
+  // Barra de tipo para puntos nuevos (sobre la gráfica)
+  const bar = $id('newtype-bar');
+  TYPE_ORDER.forEach(k => {
+    const btn = document.createElement('button');
+    btn.className = 'ms-btn'; btn.id = 'nt-' + k; btn.textContent = BAND_TYPES[k].short;
+    btn.title = `Doble clic en la gráfica crea: ${BAND_TYPES[k].label}`;
+    btn.addEventListener('click', () => setNewType(k));
+    bar.appendChild(btn);
+  });
+  setNewType(newBandType);
+
+  // Botones de tipo de la banda seleccionada
+  const types = $id('bp-types');
+  types.innerHTML = '<span class="ms-lbl">Tipo</span>';
+  TYPE_ORDER.forEach(k => {
+    const btn = document.createElement('button');
+    btn.className = 'ms-btn'; btn.id = 'bpt-' + k; btn.textContent = BAND_TYPES[k].short;
+    btn.addEventListener('click', () => { if (selBand()) setBandType(selectedId, k); });
+    types.appendChild(btn);
+  });
+
+  ['st','l','r','m','s'].forEach(m => $id('bp-' + m).addEventListener('click', () => setBandMode(m)));
+  $id('bp-on').addEventListener('change', function() {
+    const b = selBand(); if (!b) return;
+    editSet(b).on = this.checked; markEdited(b); syncPanel(); updateCharts();
+  });
+  $id('bp-del').addEventListener('click', () => { if (selBand()) deleteBand(selectedId); });
+
+  // Sliders → juego editado de la banda seleccionada
+  const bind = (id, fn) => $id(id).addEventListener('input', function() {
+    const b = selBand(); if (!b) return;
+    fn(editSet(b), this.value); markEdited(b); syncPanel(); updateCharts();
+  });
+  bind('sl-bpfc',    (p, v) => p.fc    = logToFreq(parseFloat(v), FC_RANGE));
+  bind('sl-bpgain',  (p, v) => p.gain  = parseFloat(v));
+  bind('sl-bpq',     (p, v) => p.q     = roundQ(logToFreq(parseFloat(v), Q_RANGE)));
+  bind('sl-bpslope', (p, v) => p.slope = SLOPES[parseInt(v)]);
+  // Flechas del teclado en el slider de Q: pasos exactos de 0.01
+  $id('sl-bpq').addEventListener('keydown', e => {
+    const dir = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[e.key];
+    const b = selBand();
+    if (!dir || !b) return;
+    e.preventDefault();
+    const p = editSet(b);
+    p.q = roundQ(Math.min(Q_RANGE.max, Math.max(Q_RANGE.min, p.q + dir * 0.01)));
+    $id('sl-bpq').value = freqToLog(p.q, Q_RANGE);
+    markEdited(b); syncPanel(); updateCharts();
+  });
+}
+
+window.addEventListener('resize', () => { initChartWidth(); updateCharts(); });
+initChartWidth();
+initPanel();
+initHandleEvents();
+syncPanel();
+updateCharts();
+</script>
+<div id="ctx-menu" class="ctx-menu"></div>
+</body>
+</html>

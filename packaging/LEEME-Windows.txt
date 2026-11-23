@@ -1,0 +1,20 @@
+BOBOONGECU (prototipo v0.17) para Windows
+========================================
+
+Contenido
+---------
+  Excellecu.vst3   El plugin VST3 (es una carpeta: cópiala entera).
+
+Instalar
+--------
+Copia la carpeta "Excellecu.vst3" en:
+    C:\Program Files\Common Files\VST3\
+y vuelve a escanear plugins en tu DAW o en Plugin Doctor.
+Aparece como efecto: Javhastudios > Excellecu.
+
+Medir en Plugin Doctor
+----------------------
+El ecualizador trabaja por ventanas, así que retrasa el sonido tanto como el tamaño de
+ventana (4096 muestras por defecto, unos 85 ms a 48 kHz). El plugin se lo comunica al
+programa; la latencia actual aparece arriba a la derecha en la ventana del plugin.
+Al cambiar el tamaño de ventana cambia la latencia y el audio se reinicia (silencio breve).

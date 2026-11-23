@@ -1,0 +1,28 @@
+BOBOONGECU (prototipo v0.17) para macOS (Intel y Apple Silicon)
+===============================================================
+
+Contenido
+---------
+  Excellecu.vst3       El plugin VST3.
+  Excellecu.component  El plugin Audio Unit (Logic, GarageBand...).
+
+Instalar
+--------
+Copia los archivos en estas carpetas (Finder > Ir > Ir a la carpeta...):
+    Excellecu.vst3       ->  ~/Library/Audio/Plug-Ins/VST3/
+    Excellecu.component  ->  ~/Library/Audio/Plug-Ins/Components/
+
+El plugin no está firmado con una cuenta de desarrollador de Apple. ANTES de abrir el DAW
+o Plugin Doctor, quita la cuarentena en Terminal:
+    xattr -cr ~/Library/Audio/Plug-Ins/VST3/Excellecu.vst3
+    xattr -cr ~/Library/Audio/Plug-Ins/Components/Excellecu.component
+(Truco: escribe "xattr -cr " con el espacio final y arrastra el archivo a la ventana de Terminal.)
+
+Después vuelve a escanear plugins. Aparece como efecto: Javhastudios > Excellecu.
+
+Medir en Plugin Doctor
+----------------------
+El ecualizador trabaja por ventanas, así que retrasa el sonido tanto como el tamaño de
+ventana (4096 muestras por defecto, unos 85 ms a 48 kHz). El plugin se lo comunica al
+programa; la latencia actual aparece arriba a la derecha en la ventana del plugin.
+Al cambiar el tamaño de ventana cambia la latencia y el audio se reinicia (silencio breve).
