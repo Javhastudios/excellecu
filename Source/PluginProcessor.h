@@ -18,10 +18,10 @@ class ExcellecuProcessor : public juce::AudioProcessor, private juce::Timer
 {
 public:
     ExcellecuProcessor();
-    ~ExcellecuProcessor() override = default;
+    ~ExcellecuProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
-    void releaseResources() override {}
+    void releaseResources() override;
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     using AudioProcessor::processBlock;
@@ -61,6 +61,25 @@ public:
 private:
     void timerCallback() override;
 
+    // Calcula los filtros del motor Exacto fuera del hilo de audio: cuando cambian los ajustes,
+    // los calcula y los publica; el audio los recoge y funde del filtro anterior al nuevo.
+    class KernelThread : public juce::Thread
+    {
+    public:
+        explicit KernelThread (ExcellecuProcessor& p) : juce::Thread ("Excellecu filtros"), proc (p) {}
+        void run() override
+        {
+            while (! threadShouldExit())
+            {
+                proc.engine.buildPending (proc.currentParams(), builder);
+                wait (5);
+            }
+        }
+    private:
+        ExcellecuProcessor& proc;
+        eq::KernelBuilder builder;
+    };
+
     struct SetPtrs { std::atomic<float>* on; std::atomic<float>* fc; std::atomic<float>* gain; std::atomic<float>* q; std::atomic<float>* slope; };
     struct BandPtrs { std::atomic<float>* used; std::atomic<float>* type; std::atomic<float>* edit; std::array<SetPtrs, eq::NUM_KEYS> sets; };
     std::array<BandPtrs, eq::MAX_BANDS> ptrs {};
@@ -69,6 +88,7 @@ private:
     std::atomic<float>* enginePtr = nullptr;
 
     eq::Engine engine;
+    KernelThread kernelThread { *this };
     std::atomic<double> lastSampleRate { 48000.0 };
     std::atomic<int> wantedLatency { 4096 };
     int reportedLatency = -1;

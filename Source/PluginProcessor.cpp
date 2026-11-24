@@ -124,14 +124,26 @@ eq::Params ExcellecuProcessor::currentParams() const
     return p;
 }
 
+ExcellecuProcessor::~ExcellecuProcessor()
+{
+    kernelThread.stopThread (2000);
+}
+
 void ExcellecuProcessor::prepareToPlay (double sampleRate, int)
 {
+    kernelThread.stopThread (2000);   // nada calcula filtros mientras se prepara el motor
     lastSampleRate = sampleRate;
     engine.setParams (currentParams());
     engine.prepare (sampleRate);
     wantedLatency = engine.latency();
     reportedLatency = engine.latency();
     setLatencySamples (engine.latency());
+    kernelThread.startThread();
+}
+
+void ExcellecuProcessor::releaseResources()
+{
+    kernelThread.stopThread (2000);
 }
 
 bool ExcellecuProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -146,6 +158,9 @@ void ExcellecuProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
     ScopedNoDenormals noDenormals;
     for (int c = getTotalNumInputChannels(); c < buffer.getNumChannels(); ++c) buffer.clear (c, 0, buffer.getNumSamples());
     engine.setParams (currentParams());
+    // En tiempo real los filtros nuevos llegan del otro hilo; en un render sin tiempo real se
+    // calculan aquí mismo, para que el resultado no dependa de la velocidad del render.
+    engine.setAsyncKernels (! isNonRealtime() && kernelThread.isThreadRunning());
     wantedLatency = engine.latency();
     engine.process (buffer.getArrayOfWritePointers(), jmin (2, buffer.getNumChannels()), buffer.getNumSamples());
 }

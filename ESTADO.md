@@ -1,6 +1,6 @@
 # Estado del proyecto — Excellecu (EQ por DFT, bandas dinámicas)
 
-> Para retomar: "lee el ESTADO.md de excellecu". Actualizado: 23/11/2026.
+> Para retomar: "lee el ESTADO.md de excellecu". Actualizado: 24/11/2026.
 > Plan común de Javhastudios (venta, firma, web): ESTADO.md del proyecto de Claude
 > "Javhastudios Plugins". Antecesor: boboongecu (v0.4, borrado tras medirlo en Plugin Doctor).
 
@@ -10,6 +10,30 @@ Prototipo de EQ de fase cero con curvas gaussianas y dos motores: Exacto (convol
 zero-padding, por defecto) y Clásico (FFT → ganancia por bin → FFT inversa → suma solapada).
 Original: `web/eq-dft-proto.html` (v0.18, "50 motor exacto"). Objetivo: medirlo en Plugin
 Doctor y seguir iterando.
+
+## v0.19 (24/11/2026): convolución particionada en el motor Exacto
+
+- Motivo: en Plugin Doctor (pestaña Performance) el motor Exacto salía "en escalera": cada N/2
+  muestras se calculaba un bloque entero de golpe (FFT de 2N), con picos de CPU que con buffers
+  pequeños y muchas instancias pueden provocar cortes.
+- `EqEngine.h`: el filtro es el mismo que en la web (mismo `kernelSpectrum`), pero se hace causal
+  (retraso N/2) y se parte en trozos de 256 muestras (`PART`), cada uno con su FFT de 512. El
+  audio se procesa en bloques de 256 con overlap-save y una línea de retardo en frecuencia.
+  Latencia N/2 + 256 (`latencyFor`): 8192 → 4352 muestras (90,7 ms a 48 kHz; antes 8192).
+- Filtros calculados fuera del hilo de audio: `KernelBuilder` + ranuras sin bloqueos en
+  `Engine` (`buildPending` desde otro hilo, recogida en el audio). En el plugin lo hace
+  `KernelThread` (sondea cada 5 ms). Al llegar un filtro nuevo se funde del anterior en 2048
+  muestras (`FADE_LEN`). En render sin tiempo real (`isNonRealtime`) se calculan en el propio
+  proceso. Si no hay filtro válido (al empezar o al cambiar ventana) también se calcula ahí.
+- Medido (N=8192, estéreo, 3 bandas, en la máquina de pruebas): peor llamada con buffer 64,
+  0,75 ms (antes 1,83 ms, por encima del presupuesto de 1,33 ms); buffer 1024, 0,41 ms (antes
+  6,7 ms). CPU media 1,5 % (antes 2,0 %). Cálculo de filtros con 12 bandas: 10–14 ms en el
+  otro hilo; un cambio llega a la salida en ~20 ms y termina de fundirse en ~65 ms.
+- Comprobado contra la web: los 16 escenarios salen idénticos bit a bit.
+- Prueba de humo: latencias nuevas y prueba en tiempo real (cambio de ganancia desde el hilo de
+  filtros, sin saltos en el fundido).
+- Por comprobar en Plugin Doctor: latencia 4352 con ventana 8192 (pico de la IR en ~90,7 ms a
+  48 kHz); pestaña Performance sin escalera; automatizar una banda sin clics.
 
 ## v0.18 (23/11/2026): motor Exacto
 

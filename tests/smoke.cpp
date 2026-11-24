@@ -20,10 +20,13 @@ static void check (bool ok, const String& what)
     if (! ok) ++failures;
 }
 
-// Procesa len muestras de gen(i, canal) en bloques de 480; devuelve los canales de salida
+// Procesa len muestras de gen(i, canal) en bloques de 480; devuelve los canales de salida.
+// Sin tiempo real: los filtros del motor Exacto se calculan en el propio proceso, así el
+// resultado no depende de lo rápido que vaya el hilo de filtros (eso se prueba aparte).
 template <typename Gen>
 static std::array<std::vector<float>, 2> run (ExcellecuProcessor& p, int len, Gen gen, int channels = 2)
 {
+    p.setNonRealtime (true);
     std::array<std::vector<float>, 2> out;
     for (auto& o : out) o.assign ((size_t) len, 0.0f);
     AudioBuffer<float> buf (channels, 480);
@@ -100,11 +103,11 @@ int main (int argc, char** argv)
         std::cout << "Latencia y paso directo" << std::endl;
         ExcellecuProcessor p;
         p.prepareToPlay (SR, 480);
-        check (p.getLatencySamples() == 4096, "latencia declarada 4096 con ventana 4096");
+        check (p.getLatencySamples() == 2304, "latencia declarada 2304 con ventana 4096 en modo Exacto (N/2 + 256)");
         auto out = run (p, 20000, [] (int i, int) { return i == 1000 ? 1.0f : 0.0f; });
         int peakAt = 0;
         for (int i = 0; i < 20000; ++i) if (std::abs (out[0][(size_t) i]) > std::abs (out[0][(size_t) peakAt])) peakAt = i;
-        check (peakAt == 1000 + 4096, "impulso retrasado exactamente la latencia (" + String (peakAt - 1000) + ")");
+        check (peakAt == 1000 + 2304, "impulso retrasado exactamente la latencia (" + String (peakAt - 1000) + ")");
         check (std::abs (out[0][(size_t) peakAt] - 1.0f) < 1e-5f, "sin bandas la salida es idéntica a la entrada");
     }
 
@@ -122,8 +125,9 @@ int main (int argc, char** argv)
             auto out = run (p, 20000, [] (int i, int) { return i == 1000 ? 1.0f : 0.0f; });
             int peakAt = 0;
             for (int i = 0; i < 20000; ++i) if (std::abs (out[0][(size_t) i]) > std::abs (out[0][(size_t) peakAt])) peakAt = i;
-            check (peakAt == 1000 + 4096 && std::abs (out[0][(size_t) peakAt] - 1.0f) < 1e-5f,
-                   name + ": sin bandas, impulso intacto y retrasado 4096 (" + String (peakAt - 1000) + ")");
+            const int want = e == 0 ? 2304 : 4096;
+            check (peakAt == 1000 + want && std::abs (out[0][(size_t) peakAt] - 1.0f) < 1e-5f,
+                   name + ": sin bandas, impulso intacto y retrasado " + String (want) + " (" + String (peakAt - 1000) + ")");
         }
 
         // Caso medido en Plugin Doctor: seno de 29,6 Hz a −6 dBFS con HPF 50 Hz 48 dB/oct, ventana 8192
@@ -141,8 +145,48 @@ int main (int argc, char** argv)
         check (res[0] < -120, "Exacto: residuo del HPF 48 dB/oct en graves " + String (res[0], 1) + " dBFS (objetivo < −120)");
         std::cout << "  info  Clásico: residuo " << res[1] << " dBFS" << std::endl;
         m.set (ids::engine, 0.0f);
+        run (p, 960, [] (int, int) { return 0.0f; });   // la latencia se actualiza al procesar
         MessageManager::getInstance()->runDispatchLoopUntil (300);
-        check (p.getLatencySamples() == 8192, "latencia 8192 con ventana 8192 en modo Exacto (" + String (p.getLatencySamples()) + ")");
+        check (p.getLatencySamples() == 4352, "latencia 4352 con ventana 8192 en modo Exacto (" + String (p.getLatencySamples()) + ")");
+        m.set (ids::engine, 1.0f);
+        run (p, 960, [] (int, int) { return 0.0f; });
+        MessageManager::getInstance()->runDispatchLoopUntil (300);
+        check (p.getLatencySamples() == 8192, "latencia 8192 con ventana 8192 en modo Clásico (" + String (p.getLatencySamples()) + ")");
+        m.set (ids::engine, 0.0f);
+    }
+
+    {
+        std::cout << "Tiempo real: filtros en otro hilo y fundido" << std::endl;
+        ExcellecuProcessor p;
+        p.prepareToPlay (SR, 128);
+        p.setNonRealtime (false);
+        ui::BandModel m (p);
+        m.set (ids::winSize, 3.0f);
+        const int bell = m.create (eq::Bell, 1000, 6);
+        // Se procesa a velocidad real (bloques de 128) para que el hilo de filtros vaya a su ritmo
+        const int blk = 128, len = 48000 * 2;
+        AudioBuffer<float> buf (2, blk);
+        MidiBuffer midi;
+        std::vector<float> outL ((size_t) len);
+        const auto start = Time::getMillisecondCounterHiRes();
+        for (int pos = 0; pos < len; pos += blk)
+        {
+            if (pos == 48000) m.set (ids::set (bell, eq::St, "gain"), -6.0f);
+            for (int c = 0; c < 2; ++c)
+                for (int i = 0; i < blk; ++i) buf.setSample (c, i, (float) (0.25 * std::sin (2 * eq::PI * 1000 * (pos + i) / SR)));
+            p.processBlock (buf, midi);
+            for (int i = 0; i < blk; ++i) outL[(size_t) (pos + i)] = buf.getSample (0, i);
+            const double due = start + 1000.0 * (pos + blk) / SR;
+            while (Time::getMillisecondCounterHiRes() < due) Thread::sleep (1);
+        }
+        const double before = rmsDb (outL, 30000, 46000, sineRms), after = rmsDb (outL, 80000, 96000, sineRms);
+        check (std::abs (before - 6) < 0.2 && std::abs (after + 6) < 0.2,
+               "el cambio de ganancia llega desde el hilo de filtros (" + String (before, 2) + " / " + String (after, 2) + " dB)");
+        double maxStep = 0;
+        for (int i = 40000; i < len; ++i) maxStep = std::max (maxStep, (double) std::abs (outL[(size_t) i] - outL[(size_t) i - 1]));
+        const double sineStep = 0.5 * 2 * eq::PI * 1000 / SR;   // pendiente máxima del seno a +6 dB
+        check (maxStep <= sineStep * 1.01, "fundido sin saltos (paso máximo " + String (maxStep, 4) + ", el seno llega a " + String (sineStep, 4) + ")");
+        p.releaseResources();
     }
 
     {
@@ -204,7 +248,7 @@ int main (int argc, char** argv)
             }
         check (allOk, "las 12 combinaciones de ventana y overlap sin valores raros");
         MessageManager::getInstance()->runDispatchLoopUntil (300);
-        check (p.getLatencySamples() == 8192, "latencia actualizada a 8192 (" + String (p.getLatencySamples()) + ")");
+        check (p.getLatencySamples() == 4352, "latencia actualizada a 4352 (ventana 8192, Exacto) (" + String (p.getLatencySamples()) + ")");
 
         MemoryBlock state;
         p.getStateInformation (state);

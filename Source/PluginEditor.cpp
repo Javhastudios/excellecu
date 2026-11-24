@@ -198,8 +198,9 @@ void ControlsPanel::refresh()
     ov.slider.setEnabled (! prm.exact);
     ov.slider.setAlpha (prm.exact ? 0.35f : 1.0f);
     const String note = prm.exact
-        ? u8 ("Exacto: bloques de ") + String (prm.n / 2) + u8 (" muestras sin ventana, FFT de ") + String (2 * prm.n)
-              + u8 (", filtro de ") + String (prm.n + 1) + u8 (" muestras. El overlap no se usa. Latencia: ") + String (prm.n) + u8 (" muestras.")
+        ? u8 ("Exacto: filtro de ") + String (prm.n + 1) + u8 (" muestras (diseñado con FFT de ") + String (2 * prm.n)
+              + u8 ("), aplicado por convolución en particiones de ") + String (eq::PART)
+              + u8 (" muestras. El overlap no se usa. Latencia: ") + String (eq::latencyFor (prm.n, true)) + u8 (" muestras.")
         : u8 ("Clásico: STFT con Hann periódica en análisis y síntesis. Usa 75 % de overlap para que las ventanas sumen plano. Latencia: ")
               + String (prm.n) + u8 (" muestras.");
     if (note != engineNoteText) { engineNoteText = note; needLayout = true; }
@@ -422,8 +423,9 @@ void ExcellecuEditor::refreshNow()
         shownParams = prm; shownRate = sr; shownWidth = w;
         chart.compute (prm, sr, w);
         const int hop = (int) std::floor (prm.n * (1 - prm.overlap));
-        status = u8 ("latencia ") + String (prm.n) + " muestras (" + String (1000.0 * prm.n / sr, 1) + u8 (" ms) · ")
-               + (prm.exact ? u8 ("exacto, bloque ") + String (prm.n / 2) : u8 ("clásico, hop ") + String (hop))
+        const int lat = eq::latencyFor (prm.n, prm.exact);
+        status = u8 ("latencia ") + String (lat) + " muestras (" + String (1000.0 * lat / sr, 1) + u8 (" ms) · ")
+               + (prm.exact ? u8 ("exacto, particiones de ") + String (eq::PART) : u8 ("clásico, hop ") + String (hop))
                + u8 (" · ") + String (sr / 1000.0, 1) + " kHz";
         repaint();
     }

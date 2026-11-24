@@ -3,9 +3,11 @@
 // Dos motores, como en la web:
 //  · Clásico: ventana Hann (periódica), FFT, respuesta por bin, IFFT y suma solapada. Aquí en
 //    tiempo real: se guardan las últimas N muestras y cada "hop" muestras se procesa una ventana.
-//  · Exacto: las mismas curvas como un filtro fijo de fase cero de N+1 muestras, aplicado por
-//    convolución lineal exacta (bloques de N/2 sin ventana, rellenos con ceros hasta FFT 2N).
-// Latencia = N muestras en los dos (se declara al DAW).
+//    Latencia N.
+//  · Exacto: las mismas curvas como un filtro fijo de fase cero de N+1 muestras (idéntico al de
+//    la web). En tiempo real se aplica por convolución particionada uniforme (trozos de 256
+//    muestras): mismo resultado, coste repartido por igual y latencia N/2 + 256.
+// La latencia se declara al DAW.
 //
 // Bandas: hasta 12, de cinco tipos, cada una con cinco juegos de ajustes (Estéreo, L, R,
 // Mid, Side). El juego que se edita decide el modo de la banda: Estéreo (etapa L/R, igual en
@@ -15,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -267,11 +270,160 @@ inline void computeResponse (const Params& p, int role, int n, double sr, Respon
     for (int k = 0; k < h; ++k) if (out.g[(size_t) k] != 1) { out.identity = false; break; }
 }
 
+// ── Motor exacto: filtros en particiones ──────────────────────────────────
+// Las curvas se convierten en el mismo filtro de fase cero de N+1 muestras que en la web
+// (kernelSpectrum: respuesta real en una FFT de 2N, recorte a ±N/2 con ventana coseno). En
+// tiempo real se aplica por convolución particionada uniforme: el filtro, ya causal (retrasado
+// N/2), se parte en trozos de PART muestras y cada bloque de PART muestras de audio se
+// convoluciona con todos ellos en el dominio de la frecuencia (overlap-save, FFT de 2·PART).
+// El resultado es la misma convolución lineal que la web, con un coste repartido por igual en
+// cada bloque y latencia N/2 + PART en lugar de N.
+constexpr int PART = 256;                              // tamaño de partición (bloque de audio)
+constexpr int PART_FFT = 2 * PART;                     // FFT de cada partición
+constexpr int PART_BINS = PART + 1;                    // bins útiles (señal real)
+constexpr int MAX_PARTS = (MAX_N + 1 + PART - 1) / PART;
+constexpr int FADE_LEN = 2048;                         // fundido al cambiar de filtro (muestras)
+
+inline int numParts (int n) { return (n + 1 + PART - 1) / PART; }
+// Latencia que declara el plugin para unos ajustes
+inline int latencyFor (int n, bool exact) { return exact ? n / 2 + PART : n; }
+
+// Filtros de un juego de ajustes, ya partidos y en el dominio de la frecuencia.
+// Estéreo: Lout = A·L + B·R, Rout = C·L + D·R (etapas L/R y M/S combinadas). Mono: H.
+struct KernelBank
+{
+    enum { KA = 0, KB, KC, KD, KH, NUM = 5 };
+    int n = 0, nc = 0, parts = 0;
+    double sr = 0;
+    Params params;
+    std::array<std::vector<double>, NUM> re, im;       // parts × PART_BINS cada uno
+    std::array<bool, NUM> null {};
+
+    KernelBank()
+    {
+        for (auto& v : re) v.assign ((size_t) (MAX_PARTS * PART_BINS), 0.0);
+        for (auto& v : im) v.assign ((size_t) (MAX_PARTS * PART_BINS), 0.0);
+        null.fill (true);
+    }
+    bool matches (const Params& p, int channels, double rate) const
+    {
+        return n == p.n && nc == channels && sr == rate && params.sameBands (p);
+    }
+    bool sameLayout (int size, int channels, double rate) const { return n == size && nc == channels && sr == rate; }
+};
+
+// Calcula un KernelBank. No reserva memoria al construir: se puede usar desde el hilo de audio
+// (cálculo síncrono) o desde un hilo aparte. Cada instancia, en un solo hilo.
+class KernelBuilder
+{
+public:
+    KernelBuilder() : fftPart (PART_FFT)
+    {
+        for (int s = 0; s < (int) N_OPTIONS.size(); ++s) ffts2.emplace_back (2 * N_OPTIONS[(size_t) s]);
+        for (auto& v : dense) v.assign (MAX_NF / 2 + 1, 1.0);
+        freqs.assign (MAX_NF / 2 + 1, 0.0);
+        mixG.assign (MAX_NF / 2 + 1, 0.0);
+        tr.assign (MAX_NF, 0.0); ti.assign (MAX_NF, 0.0);
+        hw.assign (MAX_NF, 0.0);
+        pr.assign (PART_FFT, 0.0); pi.assign (PART_FFT, 0.0);
+    }
+
+    void build (const Params& p, double sr, int nc, KernelBank& out)
+    {
+        int sizeIdx = 0;
+        for (int s = 0; s < (int) N_OPTIONS.size(); ++s) if (N_OPTIONS[(size_t) s] == p.n) sizeIdx = s;
+        const int n = N_OPTIONS[(size_t) sizeIdx], nf = 2 * n, len = nf / 2 + 1;
+        out.n = n; out.nc = nc; out.sr = sr; out.parts = numParts (n); out.params = p;
+
+        for (int role = 0; role < 4; ++role)
+        {
+            const double binHz = sr / nf;
+            for (int k = 0; k < len; ++k) freqs[(size_t) k] = k * binHz;
+            responseAt (p, role, freqs.data(), len, dense[(size_t) role].data());
+        }
+        const double *gl = dense[RoleL].data(), *gr = dense[RoleR].data(), *gm = dense[RoleM].data(), *gs = dense[RoleS].data();
+        double* G = mixG.data();
+        out.null.fill (true);
+        if (nc >= 2)
+        {
+            for (int k = 0; k < len; ++k) G[k] = (gm[k] + gs[k]) / 2 * gl[k];
+            makeKernel (G, sizeIdx, out, KernelBank::KA);
+            for (int k = 0; k < len; ++k) G[k] = (gm[k] - gs[k]) / 2 * gr[k];
+            makeKernel (G, sizeIdx, out, KernelBank::KB);
+            for (int k = 0; k < len; ++k) G[k] = (gm[k] - gs[k]) / 2 * gl[k];
+            makeKernel (G, sizeIdx, out, KernelBank::KC);
+            for (int k = 0; k < len; ++k) G[k] = (gm[k] + gs[k]) / 2 * gr[k];
+            makeKernel (G, sizeIdx, out, KernelBank::KD);
+        }
+        else
+        {
+            for (int k = 0; k < len; ++k) G[k] = gl[k] * gm[k];   // mono: L en etapa 1, Mid en etapa 2
+            makeKernel (G, sizeIdx, out, KernelBank::KH);
+        }
+    }
+
+private:
+    // kernelSpectrum de la web hasta el filtro recortado; luego se hace causal (retraso N/2) y se
+    // parte en trozos de PART muestras, cada uno con su FFT de 2·PART.
+    void makeKernel (const double* G, int sizeIdx, KernelBank& out, int kid)
+    {
+        const int n = N_OPTIONS[(size_t) sizeIdx], nf = 2 * n, half = n / 2;
+        bool allZero = true;
+        for (int k = 0; k <= nf / 2; ++k) if (std::abs (G[k]) > 1e-12) { allZero = false; break; }
+        out.null[(size_t) kid] = allZero;
+        if (allZero) return;
+
+        const auto& fft = ffts2[(size_t) sizeIdx];
+        double* r = tr.data(); double* i = ti.data();
+        std::fill (r, r + nf, 0.0); std::fill (i, i + nf, 0.0);
+        for (int k = 0; k <= nf / 2; ++k)
+        {
+            r[k] = G[k];
+            if (k > 0 && k < nf / 2) r[nf - k] = G[k];       // simetría hermítica (real y par)
+        }
+        fft.forward (r, i);                                   // X real y par: la FFT da n·h
+        const double inv = 1.0 / nf;
+        // Filtro causal: h_c[j] = h[j − N/2], j = 0 … N
+        double* h = hw.data();
+        for (int j = 0; j <= n; ++j)
+        {
+            const int m = j - half;                           // −N/2 … N/2
+            const double w = 0.5 * (1 + std::cos (PI * std::abs (m) / (half + 1)));
+            h[j] = r[m >= 0 ? m : nf + m] * inv * w;
+        }
+
+        const int parts = numParts (n);
+        double* dr = out.re[(size_t) kid].data(); double* di = out.im[(size_t) kid].data();
+        for (int q = 0; q < parts; ++q)
+        {
+            std::fill (pr.begin(), pr.end(), 0.0); std::fill (pi.begin(), pi.end(), 0.0);
+            for (int j = 0; j < PART; ++j)
+            {
+                const int idx = q * PART + j;
+                if (idx <= n) pr[(size_t) j] = h[idx];
+            }
+            fftPart.forward (pr.data(), pi.data());
+            for (int b = 0; b < PART_BINS; ++b)
+            {
+                dr[q * PART_BINS + b] = pr[(size_t) b];
+                di[q * PART_BINS + b] = pi[(size_t) b];
+            }
+        }
+    }
+
+    Fft fftPart;
+    std::vector<Fft> ffts2;
+    std::array<std::vector<double>, 4> dense;
+    std::vector<double> freqs, mixG, tr, ti, hw, pr, pi;
+};
+
 // ── Motor en tiempo real ──────────────────────────────────────────────────
 class Engine
 {
 public:
-    Engine()
+    static constexpr int NUM_SLOTS = 4;   // filtro actual, anterior (fundido), publicado y en cálculo
+
+    Engine() : fftPart (PART_FFT)
     {
         for (int s = 0; s < (int) N_OPTIONS.size(); ++s)
         {
@@ -279,31 +431,44 @@ public:
             windows.emplace_back ((size_t) N_OPTIONS[(size_t) s]);
             hannWindow (N_OPTIONS[(size_t) s], windows.back().data());
         }
-        for (int s = 0; s < (int) N_OPTIONS.size(); ++s) ffts2.emplace_back (2 * N_OPTIONS[(size_t) s]);
         for (auto& b : inBuf) b.assign (MAX_N, 0.0);
         for (auto& b : outBuf) b.assign (MAX_N, 0.0);
         for (auto& r : resp) r.g.assign (MAX_N / 2, 1.0);
-        for (auto& v : re) v.assign (MAX_NF, 0.0);
-        for (auto& v : im) v.assign (MAX_NF, 0.0);
-        freqs.assign (MAX_NF / 2 + 1, 0.0);
+        for (auto& v : re) v.assign (MAX_N, 0.0);
+        for (auto& v : im) v.assign (MAX_N, 0.0);
+        freqs.assign (MAX_N / 2 + 1, 0.0);
         norm.assign (MAX_N, 0.0);
         // Motor exacto
-        for (auto& v : dense) v.assign (MAX_NF / 2 + 1, 1.0);
-        for (auto& k : kern) { k.re.assign (MAX_NF, 0.0); k.im.assign (MAX_NF, 0.0); }
-        for (auto& b : acc) b.assign (3 * MAX_N / 2, 0.0);
-        tmpRe.assign (MAX_NF, 0.0); tmpIm.assign (MAX_NF, 0.0); mixG.assign (MAX_NF / 2 + 1, 0.0);
+        for (auto& v : fdlRe) v.assign ((size_t) (MAX_PARTS * PART_BINS), 0.0);
+        for (auto& v : fdlIm) v.assign ((size_t) (MAX_PARTS * PART_BINS), 0.0);
+        for (auto& v : frame) v.assign (PART_FFT, 0.0);
+        for (auto& v : outBlk) v.assign (PART, 0.0);
+        for (auto& v : yNew) v.assign (PART, 0.0);
+        for (auto& v : yOld) v.assign (PART, 0.0);
+        accRe.assign (PART_FFT, 0.0); accIm.assign (PART_FFT, 0.0);
+        for (auto& s : slotState) s.store (SlotFree);
         applyLayout();
         rebuild();
     }
 
-    void prepare (double sampleRate) { sr = sampleRate; rebuild(); reset(); }
+    void prepare (double sampleRate)
+    {
+        sr = sampleRate;
+        srForBuilder.store (sampleRate);
+        dropKernels();
+        rebuild();
+        reset();
+    }
 
     void reset()
     {
         for (auto& b : inBuf) std::fill (b.begin(), b.end(), 0.0);
         for (auto& b : outBuf) std::fill (b.begin(), b.end(), 0.0);
-        for (auto& b : acc) std::fill (b.begin(), b.end(), 0.0);
-        idx = 0;
+        for (auto& v : fdlRe) std::fill (v.begin(), v.end(), 0.0);
+        for (auto& v : fdlIm) std::fill (v.begin(), v.end(), 0.0);
+        for (auto& v : frame) std::fill (v.begin(), v.end(), 0.0);
+        for (auto& v : outBlk) std::fill (v.begin(), v.end(), 0.0);
+        idx = 0; fdlHead = 0;
     }
 
     // Solo recalcula lo que cambia
@@ -312,13 +477,17 @@ public:
         const bool layout = np.n != p.n || np.overlap != p.overlap || np.exact != p.exact;
         const bool bandsChanged = ! np.sameBands (p);
         p = np;
-        if (layout) { applyLayout(); reset(); }
+        if (layout) { applyLayout(); reset(); dropKernels(); }
         if (layout || bandsChanged) rebuild();
     }
 
+    // true: los filtros nuevos los calcula otro hilo (buildPending) y aquí solo se recogen.
+    // false: se calculan en el propio process() (pruebas, render sin tiempo real).
+    void setAsyncKernels (bool a) { async = a; }
+
     const Params& params() const { return p; }
-    int latency() const { return p.n; }
-    int hopSize() const { return p.exact ? p.n / 2 : hop; }
+    int latency() const { return latencyFor (p.n, p.exact); }
+    int hopSize() const { return p.exact ? PART : hop; }
 
     void process (float* const* ch, int numCh, int numSamples)
     {
@@ -343,7 +512,30 @@ public:
         for (int c = nc; c < numCh; ++c) std::memset (ch[c], 0, sizeof (float) * (size_t) numSamples);
     }
 
+    // ── Cálculo de filtros desde otro hilo ───────────────────────────────────
+    // Llamar periódicamente con los ajustes actuales (los mismos que recibe setParams). Si hace
+    // falta un filtro nuevo, lo calcula y lo publica; el hilo de audio lo recoge en el siguiente
+    // bloque y funde del filtro anterior al nuevo. Devuelve true si ha publicado algo.
+    bool buildPending (const Params& want, KernelBuilder& builder)
+    {
+        if (! want.exact) return false;
+        const int nc = ncForBuilder.load();
+        const double rate = srForBuilder.load();
+        if (nc <= 0) return false;
+        const int epoch = kernelEpoch.load();
+        if (lastBuiltEpoch == epoch && lastBuilt.n == want.n && lastBuiltNc == nc && lastBuiltSr == rate && lastBuilt.sameBands (want))
+            return false;
+        const int s = acquireSlot();
+        if (s < 0) return false;
+        builder.build (want, rate, nc, banks[(size_t) s]);
+        publish (s);
+        lastBuilt = want; lastBuiltNc = nc; lastBuiltSr = rate; lastBuiltEpoch = epoch;
+        return true;
+    }
+
 private:
+    enum SlotState { SlotFree = 0, SlotWriting, SlotReady, SlotInUse };
+
     void applyLayout()
     {
         sizeIdx = 0;
@@ -361,165 +553,194 @@ private:
 
     void rebuild()
     {
-        if (p.exact) kernelsFor = 0;   // el motor exacto recalcula sus filtros en el siguiente bloque
-        else for (int role = 0; role < 4; ++role) computeResponse (p, role, p.n, sr, resp[(size_t) role], freqs);
+        if (! p.exact) for (int role = 0; role < 4; ++role) computeResponse (p, role, p.n, sr, resp[(size_t) role], freqs);
         useMS = p.anyGroup (GroupMS);
     }
 
-    // ── Motor exacto (processExact de la web, en tiempo real) ────────────────
-    // Bloque B = N/2 muestras sin ventana, FFT NF = 2N, filtro de fase cero de ±N/2 muestras.
-    // acc guarda la salida pendiente: acc[0] es la muestra que sale ahora (hace N muestras).
-    // Cuando se completa un bloque, abarca desde N/2 antes de su inicio hasta N/2 después de
-    // su final: 3N/2 muestras, justo lo que cubre acc tras desplazarlo B.
-    struct Kernel { std::vector<double> re, im; bool null = true; };
-    enum { KA = 0, KB, KC, KD, KH, NUM_KERNELS };
-
-    // denseGains de la web: ganancia real de un rol en los bins 0 … nf/2
-    void denseGains (int role, int nf, double* g)
+    // ── Ranuras de filtros (sin bloqueos) ─────────────────────────────────────
+    // Cada ranura pasa por Libre → Calculando (un hilo la ha cogido) → Lista (publicada en
+    // 'latest') → En uso (el audio la ha recogido) → Libre. 'latest' guarda la última lista
+    // sin recoger; si llega otra antes, la anterior vuelve a quedar libre.
+    int acquireSlot()
     {
-        const double binHz = sr / nf;
-        const int count = nf / 2 + 1;
-        for (int k = 0; k < count; ++k) freqs[(size_t) k] = k * binHz;
-        responseAt (p, role, freqs.data(), count, g);
+        for (int s = 0; s < NUM_SLOTS; ++s)
+        {
+            int expected = SlotFree;
+            if (slotState[(size_t) s].compare_exchange_strong (expected, SlotWriting)) return s;
+        }
+        return -1;
     }
 
-    // kernelSpectrum de la web: respuesta real → filtro simétrico recortado a ±half con
-    // ventana coseno → espectro completo. Filtro nulo (todo ceros) → null.
-    void kernelSpectrum (const double* G, int nf, int half, Kernel& K)
+    void publish (int s)
     {
-        bool allZero = true;
-        for (int k = 0; k <= nf / 2; ++k) if (std::abs (G[k]) > 1e-12) { allZero = false; break; }
-        K.null = allZero;
-        if (allZero) return;
-        const auto& fft = ffts2[(size_t) sizeIdx];
-        double* r = tmpRe.data(); double* i = tmpIm.data();
-        std::fill (r, r + nf, 0.0); std::fill (i, i + nf, 0.0);
-        for (int k = 0; k <= nf / 2; ++k)
-        {
-            r[k] = G[k];
-            if (k > 0 && k < nf / 2) r[nf - k] = G[k];      // simetría hermítica (real y par)
-        }
-        fft.forward (r, i);                                  // ifft = conj(fft(conj(X))) / n; aquí X real
-        const double inv = 1.0 / nf;
-        double* hr = K.re.data(); double* hi = K.im.data();
-        std::fill (hr, hr + nf, 0.0); std::fill (hi, hi + nf, 0.0);
-        for (int n = 0; n <= half; ++n)
-        {
-            const double w = 0.5 * (1 + std::cos (PI * n / (half + 1)));   // 1 en el centro → 0 en los extremos
-            hr[n] = r[n] * inv * w;
-            if (n > 0) hr[nf - n] = r[nf - n] * inv * w;
-        }
-        fft.forward (hr, hi);
+        slotState[(size_t) s].store (SlotReady);
+        const int old = latest.exchange (s);
+        if (old >= 0) slotState[(size_t) old].store (SlotFree);
     }
 
-    void buildKernels (bool stereo)
+    void releaseSlot (int s) { if (s >= 0) slotState[(size_t) s].store (SlotFree); }
+
+    // Al cambiar de tamaño de ventana, de motor o de frecuencia de muestreo: los filtros
+    // anteriores ya no sirven (solo desde el hilo de audio).
+    void dropKernels()
     {
-        const int nf = 2 * p.n, half = p.n / 2, len = nf / 2 + 1;
-        for (int role = 0; role < 4; ++role) denseGains (role, nf, dense[(size_t) role].data());
-        const double *gl = dense[RoleL].data(), *gr = dense[RoleR].data(), *gm = dense[RoleM].data(), *gs = dense[RoleS].data();
-        double* G = mixG.data();
-        if (stereo)
-        {
-            // Lout = A·L + B·R, Rout = C·L + D·R (las dos etapas combinadas antes de recortar)
-            for (int k = 0; k < len; ++k) G[k] = (gm[k] + gs[k]) / 2 * gl[k];
-            kernelSpectrum (G, nf, half, kern[KA]);
-            for (int k = 0; k < len; ++k) G[k] = (gm[k] - gs[k]) / 2 * gr[k];
-            kernelSpectrum (G, nf, half, kern[KB]);
-            for (int k = 0; k < len; ++k) G[k] = (gm[k] - gs[k]) / 2 * gl[k];
-            kernelSpectrum (G, nf, half, kern[KC]);
-            for (int k = 0; k < len; ++k) G[k] = (gm[k] + gs[k]) / 2 * gr[k];
-            kernelSpectrum (G, nf, half, kern[KD]);
-        }
-        else
-        {
-            for (int k = 0; k < len; ++k) G[k] = gl[k] * gm[k];   // mono: L en etapa 1, Mid en etapa 2
-            kernelSpectrum (G, nf, half, kern[KH]);
-        }
-        kernelsFor = stereo ? 2 : 1;
+        releaseSlot (cur); cur = -1;
+        releaseSlot (prev); prev = -1;
+        fadePos = FADE_LEN;
+        ++kernelEpoch;                                        // el otro hilo debe volver a calcular
+    }
+
+    // Recoge el filtro publicado más reciente, si encaja con la configuración actual
+    void collectPublished (int nc)
+    {
+        if (fadePos < FADE_LEN) return;                       // primero termina el fundido en curso
+        const int s = latest.exchange (-1);
+        if (s < 0) return;
+        slotState[(size_t) s].store (SlotInUse);
+        if (! banks[(size_t) s].sameLayout (p.n, nc, sr)) { releaseSlot (s); return; }
+        startFade (s);
+    }
+
+    void startFade (int s)
+    {
+        if (cur < 0) { cur = s; return; }                     // primer filtro: sin fundido
+        releaseSlot (prev);
+        prev = cur; cur = s; fadePos = 0;
+    }
+
+    // Cálculo en el propio hilo de audio
+    void buildNow (int nc)
+    {
+        const int s = acquireSlot();
+        if (s < 0) return;
+        syncBuilder.build (p, sr, nc, banks[(size_t) s]);
+        slotState[(size_t) s].store (SlotInUse);
+        startFade (s);
     }
 
     void processExact (float* const* ch, int numCh, int numSamples)
     {
-        const int B = p.n / 2;
         const bool stereo = numCh >= 2;
         const int nc = stereo ? 2 : 1;
-        if (kernelsFor != nc) buildKernels (stereo);
+        ncForBuilder.store (nc);
+        collectPublished (nc);
+        const bool curOk = cur >= 0 && banks[(size_t) cur].sameLayout (p.n, nc, sr);
+        if (! curOk)
+        {
+            if (cur >= 0) { dropKernels(); reset(); }
+            buildNow (nc);                                     // sin filtro válido: no se puede esperar
+        }
+        else if (! async && ! banks[(size_t) cur].params.sameBands (p) && fadePos >= FADE_LEN)
+            buildNow (nc);
+        if (cur < 0)                                           // no debería pasar: sin filtro, silencio
+        {
+            for (int c = 0; c < numCh; ++c) std::memset (ch[c], 0, sizeof (float) * (size_t) numSamples);
+            return;
+        }
+
         for (int i = 0; i < numSamples; ++i)
         {
             for (int c = 0; c < nc; ++c)
             {
-                inBuf[(size_t) c][(size_t) idx] = ch[c][i];
-                ch[c][i] = (float) acc[(size_t) c][(size_t) idx];
+                frame[(size_t) c][(size_t) (PART + idx)] = ch[c][i];
+                ch[c][i] = (float) outBlk[(size_t) c][(size_t) idx];
             }
-            if (++idx == B)
+            if (++idx == PART)
             {
                 idx = 0;
-                processExactBlock (nc);
+                processPartBlock (nc);
             }
         }
         for (int c = nc; c < numCh; ++c) std::memset (ch[c], 0, sizeof (float) * (size_t) numSamples);
     }
 
-    // Y = K1·X1 (+ K2·X2), espectros completos (specMix de la web)
-    static void specMix (const Kernel& K1, const double* x1r, const double* x1i,
-                         const Kernel& K2, const double* x2r, const double* x2i,
-                         double* yr, double* yi, int n)
+    // Y = Σ_q K[q]·X[bloque − q] (+ el mismo con la segunda entrada), en bins 0 … PART
+    void accumulate (const KernelBank& bank, int k1, int src1, int k2, int src2)
     {
-        for (int k = 0; k < n; ++k) { yr[k] = 0.0; yi[k] = 0.0; }
-        if (! K1.null)
-            for (int k = 0; k < n; ++k)
+        std::fill (accRe.begin(), accRe.begin() + PART_BINS, 0.0);
+        std::fill (accIm.begin(), accIm.begin() + PART_BINS, 0.0);
+        const int parts = bank.parts;
+        const int kids[2] = { k1, k2 }, srcs[2] = { src1, src2 };
+        for (int t = 0; t < 2; ++t)
+        {
+            const int kid = kids[t], src = srcs[t];
+            if (kid < 0 || src < 0 || bank.null[(size_t) kid]) continue;
+            const double* kr = bank.re[(size_t) kid].data();
+            const double* ki = bank.im[(size_t) kid].data();
+            const double* xr = fdlRe[(size_t) src].data();
+            const double* xi = fdlIm[(size_t) src].data();
+            for (int q = 0; q < parts; ++q)
             {
-                yr[k] = K1.re[(size_t) k] * x1r[k] - K1.im[(size_t) k] * x1i[k];
-                yi[k] = K1.re[(size_t) k] * x1i[k] + K1.im[(size_t) k] * x1r[k];
+                int slot = fdlHead - q;
+                if (slot < 0) slot += parts;
+                const double* a = kr + q * PART_BINS; const double* b = ki + q * PART_BINS;
+                const double* c = xr + slot * PART_BINS; const double* d = xi + slot * PART_BINS;
+                for (int k = 0; k < PART_BINS; ++k)
+                {
+                    accRe[(size_t) k] += a[k] * c[k] - b[k] * d[k];
+                    accIm[(size_t) k] += a[k] * d[k] + b[k] * c[k];
+                }
             }
-        if (x2r != nullptr && ! K2.null)
-            for (int k = 0; k < n; ++k)
-            {
-                yr[k] += K2.re[(size_t) k] * x2r[k] - K2.im[(size_t) k] * x2i[k];
-                yi[k] += K2.re[(size_t) k] * x2i[k] + K2.im[(size_t) k] * x2r[k];
-            }
+        }
     }
 
-    void processExactBlock (int nc)
+    // Espectro acumulado (bins 0 … PART) → últimas PART muestras de la IFFT (overlap-save)
+    void synth (std::vector<double>& y)
     {
-        const int n = p.n, nf = 2 * n, half = n / 2, B = n / 2, accLen = 3 * n / 2;
-        const auto& fft = ffts2[(size_t) sizeIdx];
+        for (int k = 1; k < PART; ++k) { accRe[(size_t) (PART_FFT - k)] = accRe[(size_t) k]; accIm[(size_t) (PART_FFT - k)] = -accIm[(size_t) k]; }
+        for (int k = 0; k < PART_FFT; ++k) accIm[(size_t) k] = -accIm[(size_t) k];   // ifft = conj(fft(conj(Y))) / n
+        fftPart.forward (accRe.data(), accIm.data());
+        const double inv = 1.0 / PART_FFT;
+        for (int j = 0; j < PART; ++j) y[(size_t) j] = accRe[(size_t) (PART + j)] * inv;
+    }
 
-        // Bloque sin ventana + ceros → FFT (re/im[c] de tamaño nf)
+    void outputFor (const KernelBank& bank, int nc, std::array<std::vector<double>, 2>& y)
+    {
+        if (nc == 2)
+        {
+            accumulate (bank, KernelBank::KA, 0, KernelBank::KB, 1); synth (y[0]);
+            accumulate (bank, KernelBank::KC, 0, KernelBank::KD, 1); synth (y[1]);
+        }
+        else
+        {
+            accumulate (bank, KernelBank::KH, 0, -1, -1); synth (y[0]);
+        }
+    }
+
+    void processPartBlock (int nc)
+    {
+        const KernelBank& bank = banks[(size_t) cur];
+        const int parts = bank.parts;
+        fdlHead = (fdlHead + 1) % parts;
+
+        // Trama de 2·PART (bloque anterior + actual) → FFT → línea de retardo en frecuencia
         for (int c = 0; c < nc; ++c)
         {
-            double* xr = re[(size_t) c].data(); double* xi = im[(size_t) c].data();
-            for (int i = 0; i < B; ++i) xr[i] = inBuf[(size_t) c][(size_t) i];
-            std::fill (xr + B, xr + nf, 0.0);
-            std::fill (xi, xi + nf, 0.0);
-            fft.forward (xr, xi);
+            double* f = frame[(size_t) c].data();
+            for (int j = 0; j < PART_FFT; ++j) { accRe[(size_t) j] = f[j]; accIm[(size_t) j] = 0.0; }
+            fftPart.forward (accRe.data(), accIm.data());
+            double* xr = fdlRe[(size_t) c].data() + fdlHead * PART_BINS;
+            double* xi = fdlIm[(size_t) c].data() + fdlHead * PART_BINS;
+            for (int k = 0; k < PART_BINS; ++k) { xr[k] = accRe[(size_t) k]; xi[k] = accIm[(size_t) k]; }
+            std::memmove (f, f + PART, sizeof (double) * PART);   // el bloque actual pasa a ser el anterior
         }
 
-        // La salida pendiente avanza B muestras
-        for (int c = 0; c < nc; ++c)
+        outputFor (bank, nc, yNew);
+        if (fadePos < FADE_LEN && prev >= 0)
         {
-            auto& a = acc[(size_t) c];
-            std::memmove (a.data(), a.data() + B, sizeof (double) * (size_t) (accLen - B));
-            std::fill (a.begin() + (accLen - B), a.begin() + accLen, 0.0);
-        }
-
-        for (int c = 0; c < nc; ++c)
-        {
-            double* yr = tmpRe.data(); double* yi = tmpIm.data();
-            if (nc == 2)
+            outputFor (banks[(size_t) prev], nc, yOld);
+            for (int j = 0; j < PART; ++j)
             {
-                if (c == 0) specMix (kern[KA], re[0].data(), im[0].data(), kern[KB], re[1].data(), im[1].data(), yr, yi, nf);
-                else        specMix (kern[KC], re[0].data(), im[0].data(), kern[KD], re[1].data(), im[1].data(), yr, yi, nf);
+                const double w = std::min (1.0, (double) (fadePos + j + 1) / FADE_LEN);
+                for (int c = 0; c < nc; ++c)
+                    outBlk[(size_t) c][(size_t) j] = yOld[(size_t) c][(size_t) j] * (1 - w) + yNew[(size_t) c][(size_t) j] * w;
             }
-            else specMix (kern[KH], re[0].data(), im[0].data(), kern[KH], nullptr, nullptr, yr, yi, nf);
-
-            for (int k = 0; k < nf; ++k) yi[k] = -yi[k];        // ifft = conj(fft(conj(Y))) / n
-            fft.forward (yr, yi);
-            const double inv = 1.0 / nf;
-            auto& a = acc[(size_t) c];
-            // tiempos de inicio−N/2 … inicio−1 (parte anticipada) y inicio … inicio+N−1
-            for (int m = 0; m < half; ++m) a[(size_t) m] += yr[nf - half + m] * inv;
-            for (int k = 0; k < n; ++k)    a[(size_t) (half + k)] += yr[k] * inv;
+            fadePos += PART;
+            if (fadePos >= FADE_LEN) { releaseSlot (prev); prev = -1; }
+        }
+        else
+        {
+            for (int c = 0; c < nc; ++c) std::memcpy (outBlk[(size_t) c].data(), yNew[(size_t) c].data(), sizeof (double) * PART);
         }
     }
 
@@ -586,16 +807,29 @@ private:
     double sr = 48000;
     int sizeIdx = 2, hop = 2048, idx = 0;
     bool useMS = false;
-    int kernelsFor = 0;                 // canales para los que están calculados los filtros (0 = ninguno)
-    std::vector<Fft> ffts, ffts2;       // FFT de tamaño N (clásico) y 2N (exacto)
-    std::array<std::vector<double>, 4> dense;
-    std::array<Kernel, NUM_KERNELS> kern;
-    std::array<std::vector<double>, 2> acc;
-    std::vector<double> tmpRe, tmpIm, mixG;
+    std::vector<Fft> ffts;                 // FFT de tamaño N (clásico)
     std::vector<std::vector<double>> windows;
     std::array<std::vector<double>, 2> inBuf, outBuf, re, im;
-    std::array<Response, 4> resp;   // L, R, Mid, Side
+    std::array<Response, 4> resp;          // L, R, Mid, Side
     std::vector<double> freqs, norm;
+
+    // Motor exacto
+    Fft fftPart;
+    KernelBuilder syncBuilder;
+    std::array<KernelBank, NUM_SLOTS> banks;
+    std::array<std::atomic<int>, NUM_SLOTS> slotState;
+    std::atomic<int> latest { -1 };
+    std::atomic<int> ncForBuilder { 0 };
+    std::atomic<double> srForBuilder { 48000 };
+    int cur = -1, prev = -1, fadePos = FADE_LEN, fdlHead = 0;
+    bool async = false;
+    std::array<std::vector<double>, 2> fdlRe, fdlIm, frame, outBlk, yNew, yOld;
+    std::vector<double> accRe, accIm;
+    std::atomic<int> kernelEpoch { 0 };   // sube cada vez que los filtros anteriores dejan de valer
+    // Solo los usa el hilo que llama a buildPending
+    Params lastBuilt;
+    int lastBuiltNc = 0, lastBuiltEpoch = -1;
+    double lastBuiltSr = 0;
 };
 } // namespace eq
 

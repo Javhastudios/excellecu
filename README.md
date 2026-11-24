@@ -1,4 +1,4 @@
-# Excellecu — EQ por DFT con bandas dinámicas (prototipo v0.18)
+# Excellecu — EQ por DFT con bandas dinámicas (prototipo v0.19)
 
 Ecualizador de fase cero que trabaja en el dominio de la frecuencia, con curvas gaussianas.
 Sale del prototipo web `web/eq-dft-proto.html` (v0.18, `eq_dft_proto_50_motor_exacto.html`).
@@ -9,20 +9,23 @@ Sale del prototipo web `web/eq-dft-proto.html` (v0.18, `eq_dft_proto_50_motor_ex
   cambia Q o pendiente, Alt afina, rueda = Q/pendiente, clic derecho = menú, Supr = borrar.
 - Dos motores, seleccionables:
   - **Exacto** (por defecto): las curvas se convierten en un filtro fijo de fase cero de N+1
-    muestras y se aplican por convolución lineal exacta (bloques de N/2 sin ventana, FFT de 2N).
-    Sin aliasing temporal ni huella de bloque: el residuo del HPF en graves baja de −70 a
-    −155 dBFS.
+    muestras y se aplican por convolución lineal exacta. En el plugin, la convolución es
+    particionada (trozos de 256 muestras): coste repartido por igual en cada bloque y latencia
+    N/2 + 256. Los filtros se calculan en un hilo aparte y, al cambiar un ajuste, se funde del
+    filtro anterior al nuevo en 2048 muestras. Sin aliasing temporal ni huella de bloque: el
+    residuo del HPF en graves baja de −70 a −155 dBFS.
   - **Clásico**: ventana Hann (periódica), FFT, ganancia en cada bin, FFT inversa y suma
     solapada (25, 50 o 75 %).
-- Ventana N de 512, 1024, 4096 u 8192 muestras. Latencia N en los dos motores.
+- Ventana N de 512, 1024, 4096 u 8192 muestras. Latencia: N/2 + 256 en Exacto (8192 → 4352) y N en Clásico.
 
 Formatos: VST3 (Windows, macOS, Linux) y AU (macOS). Efecto estéreo o mono.
 
 ## Diferencias con la web
 
-- La web procesa un archivo entero; el plugin procesa en tiempo real con una latencia igual al
-  tamaño de ventana (se declara al DAW). El resultado es idéntico al de la web (lo comprueba
-  `tests/`), solo retrasado.
+- La web procesa un archivo entero; el plugin procesa en tiempo real con latencia (se declara
+  al DAW). El resultado es idéntico al de la web (lo comprueba `tests/`), solo retrasado.
+- En un render sin tiempo real, los filtros se calculan en el propio proceso, para que el
+  resultado no dependa de la velocidad del render.
 - No hay carga de archivo, reproducción ni exportación WAV (lo hace el DAW).
 - Cada banda ocupa un "hueco" fijo (1 a 12) para que el DAW pueda automatizarla. Al borrar una
   banda, las demás no se renumeran como en la web; la siguiente nueva ocupa el hueco libre.
