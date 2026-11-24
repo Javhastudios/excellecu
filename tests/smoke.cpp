@@ -1,4 +1,4 @@
-// Prueba de humo del plugin completo: latencia, motores Exacto y Clásico, bandas de cada tipo,
+// Prueba de humo del plugin completo: latencia, HPF en graves, filtros en tiempo real, bandas de cada tipo,
 // modos L/R y M/S, límite de 12 bandas, estado guardado, mono y capturas de la interfaz.
 //   ex_smoke <carpeta-salida>
 #include "PluginEditor.h"
@@ -103,56 +103,29 @@ int main (int argc, char** argv)
         std::cout << "Latencia y paso directo" << std::endl;
         ExcellecuProcessor p;
         p.prepareToPlay (SR, 480);
-        check (p.getLatencySamples() == 2304, "latencia declarada 2304 con ventana 4096 en modo Exacto (N/2 + 256)");
+        check (p.getLatencySamples() == 4352, "latencia declarada 4352 (filtro de 8193 muestras: N/2 + 256)");
         auto out = run (p, 20000, [] (int i, int) { return i == 1000 ? 1.0f : 0.0f; });
         int peakAt = 0;
         for (int i = 0; i < 20000; ++i) if (std::abs (out[0][(size_t) i]) > std::abs (out[0][(size_t) peakAt])) peakAt = i;
-        check (peakAt == 1000 + 2304, "impulso retrasado exactamente la latencia (" + String (peakAt - 1000) + ")");
+        check (peakAt == 1000 + 4352, "impulso retrasado exactamente la latencia (" + String (peakAt - 1000) + ")");
         check (std::abs (out[0][(size_t) peakAt] - 1.0f) < 1e-5f, "sin bandas la salida es idéntica a la entrada");
+        check (p.apvts.getParameter ("engine") == nullptr && p.apvts.getParameter ("winSize") == nullptr
+                   && p.apvts.getParameter ("overlap") == nullptr,
+               "sin parámetros de motor, ventana ni overlap (quitados en la v0.20)");
     }
 
     {
-        std::cout << "Motores Exacto y Clásico" << std::endl;
+        std::cout << "HPF pronunciado en graves" << std::endl;
         ExcellecuProcessor p;
         p.prepareToPlay (SR, 480);
         ui::BandModel m (p);
-        check (p.currentParams().exact, "arranca en motor Exacto");
-        for (int e = 0; e < 2; ++e)
-        {
-            const String name = e == 0 ? "Exacto" : "Clásico";
-            m.set (ids::engine, (float) e);
-            m.set (ids::winSize, 2.0f);
-            auto out = run (p, 20000, [] (int i, int) { return i == 1000 ? 1.0f : 0.0f; });
-            int peakAt = 0;
-            for (int i = 0; i < 20000; ++i) if (std::abs (out[0][(size_t) i]) > std::abs (out[0][(size_t) peakAt])) peakAt = i;
-            const int want = e == 0 ? 2304 : 4096;
-            check (peakAt == 1000 + want && std::abs (out[0][(size_t) peakAt] - 1.0f) < 1e-5f,
-                   name + ": sin bandas, impulso intacto y retrasado " + String (want) + " (" + String (peakAt - 1000) + ")");
-        }
-
-        // Caso medido en Plugin Doctor: seno de 29,6 Hz a −6 dBFS con HPF 50 Hz 48 dB/oct, ventana 8192
+        // Caso medido en Plugin Doctor: seno de 29,6 Hz a −6 dBFS con HPF 50 Hz 48 dB/oct
         const int hp = m.create (eq::HighPass, 50.3, 0);
         m.set (ids::set (hp, eq::St, "slope"), 3.0f);
-        m.set (ids::winSize, 3.0f);
-        double res[2];
-        for (int e = 0; e < 2; ++e)
-        {
-            m.set (ids::engine, (float) e);
-            auto o = run (p, 120000, sine (29.6, 0.5));
-            res[e] = residualDbfs (o[0], 50000, 110000, 29.6);
-            check (finite (o[0]), String (e == 0 ? "Exacto" : "Clásico") + ": HPF en graves sin valores raros");
-        }
-        check (res[0] < -120, "Exacto: residuo del HPF 48 dB/oct en graves " + String (res[0], 1) + " dBFS (objetivo < −120)");
-        std::cout << "  info  Clásico: residuo " << res[1] << " dBFS" << std::endl;
-        m.set (ids::engine, 0.0f);
-        run (p, 960, [] (int, int) { return 0.0f; });   // la latencia se actualiza al procesar
-        MessageManager::getInstance()->runDispatchLoopUntil (300);
-        check (p.getLatencySamples() == 4352, "latencia 4352 con ventana 8192 en modo Exacto (" + String (p.getLatencySamples()) + ")");
-        m.set (ids::engine, 1.0f);
-        run (p, 960, [] (int, int) { return 0.0f; });
-        MessageManager::getInstance()->runDispatchLoopUntil (300);
-        check (p.getLatencySamples() == 8192, "latencia 8192 con ventana 8192 en modo Clásico (" + String (p.getLatencySamples()) + ")");
-        m.set (ids::engine, 0.0f);
+        auto o = run (p, 120000, sine (29.6, 0.5));
+        const double res = residualDbfs (o[0], 50000, 110000, 29.6);
+        check (finite (o[0]), "HPF en graves sin valores raros");
+        check (res < -120, "residuo del HPF 48 dB/oct en graves " + String (res, 1) + " dBFS (objetivo < −120)");
     }
 
     {
@@ -161,7 +134,6 @@ int main (int argc, char** argv)
         p.prepareToPlay (SR, 128);
         p.setNonRealtime (false);
         ui::BandModel m (p);
-        m.set (ids::winSize, 3.0f);
         const int bell = m.create (eq::Bell, 1000, 6);
         // Se procesa a velocidad real (bloques de 128) para que el hilo de filtros vaya a su ritmo
         const int blk = 128, len = 48000 * 2;
@@ -236,26 +208,16 @@ int main (int argc, char** argv)
         while (m.create (eq::Bell, 100.0 * (created + 1), 3) >= 0) ++created;
         check (created == 12 && m.create (eq::Bell, 500, 0) == -1, "máximo 12 bandas");
 
-        // Ventanas y solapes en marcha con muchas bandas
-        bool allOk = true;
-        for (int w = 0; w < 4; ++w)
-            for (int ov = 0; ov < 3; ++ov)
-            {
-                m.set (ids::winSize, (float) w);
-                m.set (ids::overlap, (float) ov);
-                o = run (p, 20000, [] (int i, int c) { return 0.2f * (float) std::sin (0.013 * i * (c + 1)) + (i % 97 == 0 ? 0.3f : 0.0f); });
-                allOk = allOk && finite (o[0]) && finite (o[1]);
-            }
-        check (allOk, "las 12 combinaciones de ventana y overlap sin valores raros");
-        MessageManager::getInstance()->runDispatchLoopUntil (300);
-        check (p.getLatencySamples() == 4352, "latencia actualizada a 4352 (ventana 8192, Exacto) (" + String (p.getLatencySamples()) + ")");
+        // Las 12 bandas en marcha
+        o = run (p, 40000, [] (int i, int c) { return 0.2f * (float) std::sin (0.013 * i * (c + 1)) + (i % 97 == 0 ? 0.3f : 0.0f); });
+        check (finite (o[0]) && finite (o[1]), "12 bandas sin valores raros");
 
         MemoryBlock state;
         p.getStateInformation (state);
         ExcellecuProcessor q;
         q.setStateInformation (state.getData(), (int) state.getSize());
         const auto a = p.currentParams(), b = q.currentParams();
-        bool same = a.n == b.n && a.overlap == b.overlap && a.exact == b.exact;
+        bool same = a.n == b.n;
         for (int s = 0; s < eq::MAX_BANDS; ++s)
         {
             const auto &x = a.bands[(size_t) s], &y = b.bands[(size_t) s];

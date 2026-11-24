@@ -11,6 +11,20 @@ zero-padding, por defecto) y Clásico (FFT → ganancia por bin → FFT inversa 
 Original: `web/eq-dft-proto.html` (v0.18, "50 motor exacto"). Objetivo: medirlo en Plugin
 Doctor y seguir iterando.
 
+## v0.20 (24/11/2026): solo motor Exacto, filtro fijo de 8192
+
+- Prueba de nulo en Ableton (loops iguales, mismos puntos, uno con polaridad invertida): Exacto
+  y Clásico casi anulan; el residuo solo se oye con los monitores al máximo ("fondo de
+  botella"). Decisión: quitar el Clásico del plugin y fijar N = 8192.
+- Quitados los parámetros `engine`, `winSize` y `overlap` y sus controles (panel "Motor" queda
+  como nota). `Params` ya no tiene `overlap` ni `exact`; `latencyFor (n)` = n/2 + 256; el
+  procesador usa `kWindow = 8192`. El motor C++ conserva otros N para las pruebas contra la web.
+- Pruebas: comparación con la web solo en el motor Exacto (8 escenarios, idénticos); prueba de
+  humo adaptada (latencia 4352, sin parámetros de motor, HPF en graves, 12 bandas).
+- El título de la ventana muestra la versión del plugin (antes "V0.18" fijo).
+- Sesiones guardadas con versiones anteriores: los tres parámetros quitados se ignoran.
+- Pendiente: a 88,2/96 kHz el filtro de 8192 resuelve la mitad en graves; valorar 16 384 ahí.
+
 ## v0.19.1 (24/11/2026): cuelgue al reabrir la ventana y ventana lenta
 
 - Cuelgue (Ableton, VST3, Mac): al abrir la ventana con una banda seleccionada, el botón

@@ -1,13 +1,11 @@
 // Motor del EQ: traducción del prototipo web v0.18 (web/eq-dft-proto.html) a C++ sin JUCE.
 //
-// Dos motores, como en la web:
-//  · Clásico: ventana Hann (periódica), FFT, respuesta por bin, IFFT y suma solapada. Aquí en
-//    tiempo real: se guardan las últimas N muestras y cada "hop" muestras se procesa una ventana.
-//    Latencia N.
-//  · Exacto: las mismas curvas como un filtro fijo de fase cero de N+1 muestras (idéntico al de
-//    la web). En tiempo real se aplica por convolución particionada uniforme (trozos de 256
-//    muestras): mismo resultado, coste repartido por igual y latencia N/2 + 256.
-// La latencia se declara al DAW.
+// Motor Exacto de la web: las curvas se convierten en un filtro fijo de fase cero de N+1
+// muestras (idéntico al de la web). En tiempo real se aplica por convolución particionada
+// uniforme (trozos de 256 muestras): mismo resultado, coste repartido por igual y latencia
+// N/2 + 256, que se declara al DAW. El plugin usa N = 8192. (El motor Clásico de la web, STFT
+// con ventana Hann, se quitó del plugin en la v0.20: medía peor y en la prueba de nulo apenas
+// se distinguía.)
 //
 // Bandas: hasta 12, de cinco tipos, cada una con cinco juegos de ajustes (Estéreo, L, R,
 // Mid, Side). El juego que se edita decide el modo de la banda: Estéreo (etapa L/R, igual en
@@ -35,7 +33,6 @@ namespace eq
 constexpr double PI = 3.14159265358979323846;
 
 inline const std::array<int, 4> N_OPTIONS { 512, 1024, 4096, 8192 };
-inline const std::array<double, 3> OV_OPTIONS { 0.25, 0.5, 0.75 };
 inline const std::array<int, 4> SLOPES { 6, 12, 24, 48 };
 constexpr int MAX_N = 8192;
 constexpr int MAX_NF = 2 * MAX_N;   // FFT del motor exacto
@@ -73,9 +70,7 @@ struct Band
 struct Params
 {
     std::array<Band, MAX_BANDS> bands;
-    int n = 4096;
-    double overlap = 0.5;
-    bool exact = true;                // motor Exacto (true) o Clásico (false)
+    int n = 8192;                     // tamaño del filtro (N+1 muestras) y de su FFT de diseño (2N)
     bool sameBands (const Params& o) const { return bands == o.bands; }
     bool anyGroup (Group g) const
     {
@@ -286,7 +281,7 @@ constexpr int FADE_LEN = 2048;                         // fundido al cambiar de 
 
 inline int numParts (int n) { return (n + 1 + PART - 1) / PART; }
 // Latencia que declara el plugin para unos ajustes
-inline int latencyFor (int n, bool exact) { return exact ? n / 2 + PART : n; }
+inline int latencyFor (int n) { return n / 2 + PART; }
 
 // Filtros de un juego de ajustes, ya partidos y en el dominio de la frecuencia.
 // Estéreo: Lout = A·L + B·R, Rout = C·L + D·R (etapas L/R y M/S combinadas). Mono: H.
@@ -425,20 +420,6 @@ public:
 
     Engine() : fftPart (PART_FFT)
     {
-        for (int s = 0; s < (int) N_OPTIONS.size(); ++s)
-        {
-            ffts.emplace_back (N_OPTIONS[(size_t) s]);
-            windows.emplace_back ((size_t) N_OPTIONS[(size_t) s]);
-            hannWindow (N_OPTIONS[(size_t) s], windows.back().data());
-        }
-        for (auto& b : inBuf) b.assign (MAX_N, 0.0);
-        for (auto& b : outBuf) b.assign (MAX_N, 0.0);
-        for (auto& r : resp) r.g.assign (MAX_N / 2, 1.0);
-        for (auto& v : re) v.assign (MAX_N, 0.0);
-        for (auto& v : im) v.assign (MAX_N, 0.0);
-        freqs.assign (MAX_N / 2 + 1, 0.0);
-        norm.assign (MAX_N, 0.0);
-        // Motor exacto
         for (auto& v : fdlRe) v.assign ((size_t) (MAX_PARTS * PART_BINS), 0.0);
         for (auto& v : fdlIm) v.assign ((size_t) (MAX_PARTS * PART_BINS), 0.0);
         for (auto& v : frame) v.assign (PART_FFT, 0.0);
@@ -448,7 +429,6 @@ public:
         accRe.assign (PART_FFT, 0.0); accIm.assign (PART_FFT, 0.0);
         for (auto& s : slotState) s.store (SlotFree);
         applyLayout();
-        rebuild();
     }
 
     void prepare (double sampleRate)
@@ -456,14 +436,11 @@ public:
         sr = sampleRate;
         srForBuilder.store (sampleRate);
         dropKernels();
-        rebuild();
         reset();
     }
 
     void reset()
     {
-        for (auto& b : inBuf) std::fill (b.begin(), b.end(), 0.0);
-        for (auto& b : outBuf) std::fill (b.begin(), b.end(), 0.0);
         for (auto& v : fdlRe) std::fill (v.begin(), v.end(), 0.0);
         for (auto& v : fdlIm) std::fill (v.begin(), v.end(), 0.0);
         for (auto& v : frame) std::fill (v.begin(), v.end(), 0.0);
@@ -471,14 +448,11 @@ public:
         idx = 0; fdlHead = 0;
     }
 
-    // Solo recalcula lo que cambia
     void setParams (const Params& np)
     {
-        const bool layout = np.n != p.n || np.overlap != p.overlap || np.exact != p.exact;
-        const bool bandsChanged = ! np.sameBands (p);
+        const bool layout = np.n != p.n;
         p = np;
         if (layout) { applyLayout(); reset(); dropKernels(); }
-        if (layout || bandsChanged) rebuild();
     }
 
     // true: los filtros nuevos los calcula otro hilo (buildPending) y aquí solo se recogen.
@@ -486,31 +460,10 @@ public:
     void setAsyncKernels (bool a) { async = a; }
 
     const Params& params() const { return p; }
-    int latency() const { return latencyFor (p.n, p.exact); }
-    int hopSize() const { return p.exact ? PART : hop; }
+    int latency() const { return latencyFor (p.n); }
+    int hopSize() const { return PART; }
 
-    void process (float* const* ch, int numCh, int numSamples)
-    {
-        if (p.exact) { processExact (ch, numCh, numSamples); return; }
-        const int n = p.n;
-        const bool stereo = numCh >= 2;
-        const int nc = stereo ? 2 : 1;
-        for (int i = 0; i < numSamples; ++i)
-        {
-            const double nm = norm[(size_t) idx];
-            for (int c = 0; c < nc; ++c)
-            {
-                inBuf[(size_t) c][(size_t) (n - hop + idx)] = ch[c][i];
-                ch[c][i] = (float) (nm > 1e-6 ? outBuf[(size_t) c][(size_t) idx] / nm : 0.0);
-            }
-            if (++idx == hop)
-            {
-                idx = 0;
-                processFrame (nc);
-            }
-        }
-        for (int c = nc; c < numCh; ++c) std::memset (ch[c], 0, sizeof (float) * (size_t) numSamples);
-    }
+    void process (float* const* ch, int numCh, int numSamples) { processExact (ch, numCh, numSamples); }
 
     // ── Cálculo de filtros desde otro hilo ───────────────────────────────────
     // Llamar periódicamente con los ajustes actuales (los mismos que recibe setParams). Si hace
@@ -518,7 +471,6 @@ public:
     // bloque y funde del filtro anterior al nuevo. Devuelve true si ha publicado algo.
     bool buildPending (const Params& want, KernelBuilder& builder)
     {
-        if (! want.exact) return false;
         const int nc = ncForBuilder.load();
         const double rate = srForBuilder.load();
         if (nc <= 0) return false;
@@ -538,23 +490,9 @@ private:
 
     void applyLayout()
     {
-        sizeIdx = 0;
+        int sizeIdx = 0;
         for (int s = 0; s < (int) N_OPTIONS.size(); ++s) if (N_OPTIONS[(size_t) s] == p.n) sizeIdx = s;
         p.n = N_OPTIONS[(size_t) sizeIdx];
-        hop = std::max (1, (int) std::floor (p.n * (1 - p.overlap)));
-        const double* w = windows[(size_t) sizeIdx].data();
-        for (int r = 0; r < hop; ++r)
-        {
-            double s = 0;
-            for (int j = r; j < p.n; j += hop) s += w[j] * w[j];
-            norm[(size_t) r] = s;
-        }
-    }
-
-    void rebuild()
-    {
-        if (! p.exact) for (int role = 0; role < 4; ++role) computeResponse (p, role, p.n, sr, resp[(size_t) role], freqs);
-        useMS = p.anyGroup (GroupMS);
     }
 
     // ── Ranuras de filtros (sin bloqueos) ─────────────────────────────────────
@@ -744,76 +682,9 @@ private:
         }
     }
 
-    // processStereoBlock / processMonoBlock de la web
-    void processFrame (int nc)
-    {
-        const int n = p.n;
-        const double* win = windows[(size_t) sizeIdx].data();
-        const auto& fft = ffts[(size_t) sizeIdx];
-        for (int c = 0; c < nc; ++c)
-        {
-            double* xr = re[(size_t) c].data();
-            double* xi = im[(size_t) c].data();
-            for (int i = 0; i < n; ++i) { xr[i] = inBuf[(size_t) c][(size_t) i] * win[i]; xi[i] = 0.0; }
-            fft.forward (xr, xi);
-        }
-
-        double *lr = re[0].data(), *li = im[0].data(), *rr = re[1].data(), *ri = im[1].data();
-        if (nc == 2)
-        {
-            applyResponse (lr, li, n, resp[RoleL]);
-            applyResponse (rr, ri, n, resp[RoleR]);
-            if (useMS)
-            {
-                for (int k = 0; k < n; ++k)
-                {
-                    const double a = lr[k], b = li[k], c = rr[k], d = ri[k];
-                    lr[k] = (a + c) * 0.5; li[k] = (b + d) * 0.5;
-                    rr[k] = (a - c) * 0.5; ri[k] = (b - d) * 0.5;
-                }
-                applyResponse (lr, li, n, resp[RoleM]);
-                applyResponse (rr, ri, n, resp[RoleS]);
-                for (int k = 0; k < n; ++k)
-                {
-                    const double a = lr[k], b = li[k], c = rr[k], d = ri[k];
-                    lr[k] = a + c; li[k] = b + d;
-                    rr[k] = a - c; ri[k] = b - d;
-                }
-            }
-        }
-        else
-        {
-            applyResponse (lr, li, n, resp[RoleL]);
-            applyResponse (lr, li, n, resp[RoleM]);
-        }
-
-        const double invN = 1.0 / n;
-        for (int c = 0; c < nc; ++c)
-        {
-            double* xr = re[(size_t) c].data();
-            double* xi = im[(size_t) c].data();
-            for (int i = 0; i < n; ++i) xi[i] = -xi[i];          // ifft = conj(fft(conj(X))) / n
-            fft.forward (xr, xi);
-            auto& out = outBuf[(size_t) c];
-            std::memmove (out.data(), out.data() + hop, sizeof (double) * (size_t) (n - hop));
-            std::fill (out.begin() + (n - hop), out.begin() + n, 0.0);
-            for (int i = 0; i < n; ++i) out[(size_t) i] += xr[i] * invN * win[i];
-            auto& in = inBuf[(size_t) c];
-            std::memmove (in.data(), in.data() + hop, sizeof (double) * (size_t) (n - hop));
-        }
-    }
-
     Params p;
     double sr = 48000;
-    int sizeIdx = 2, hop = 2048, idx = 0;
-    bool useMS = false;
-    std::vector<Fft> ffts;                 // FFT de tamaño N (clásico)
-    std::vector<std::vector<double>> windows;
-    std::array<std::vector<double>, 2> inBuf, outBuf, re, im;
-    std::array<Response, 4> resp;          // L, R, Mid, Side
-    std::vector<double> freqs, norm;
-
-    // Motor exacto
+    int idx = 0;
     Fft fftPart;
     KernelBuilder syncBuilder;
     std::array<KernelBank, NUM_SLOTS> banks;

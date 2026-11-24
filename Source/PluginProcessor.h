@@ -9,14 +9,14 @@ namespace ids
 inline const juce::StringArray keyIds { "st", "l", "r", "m", "s" };
 inline juce::String band (int slot, const char* field) { return "b" + juce::String (slot + 1) + "_" + field; }
 inline juce::String set (int slot, int key, const char* field) { return "b" + juce::String (slot + 1) + "_" + keyIds[key] + "_" + field; }
-inline constexpr const char* winSize = "winSize";
-inline constexpr const char* overlap = "overlap";
-inline constexpr const char* engine = "engine";   // 0 = Exacto, 1 = Clásico
 } // namespace ids
 
 class ExcellecuProcessor : public juce::AudioProcessor, private juce::Timer
 {
 public:
+    // Tamaño del filtro del motor (N): filtro de N+1 muestras, latencia N/2 + 256
+    static constexpr int kWindow = 8192;
+
     ExcellecuProcessor();
     ~ExcellecuProcessor() override;
 
@@ -83,14 +83,11 @@ private:
     struct SetPtrs { std::atomic<float>* on; std::atomic<float>* fc; std::atomic<float>* gain; std::atomic<float>* q; std::atomic<float>* slope; };
     struct BandPtrs { std::atomic<float>* used; std::atomic<float>* type; std::atomic<float>* edit; std::array<SetPtrs, eq::NUM_KEYS> sets; };
     std::array<BandPtrs, eq::MAX_BANDS> ptrs {};
-    std::atomic<float>* winPtr = nullptr;
-    std::atomic<float>* ovPtr = nullptr;
-    std::atomic<float>* enginePtr = nullptr;
 
     eq::Engine engine;
     KernelThread kernelThread { *this };
     std::atomic<double> lastSampleRate { 48000.0 };
-    std::atomic<int> wantedLatency { 4096 };
+    std::atomic<int> wantedLatency { eq::latencyFor (kWindow) };
     int reportedLatency = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ExcellecuProcessor)

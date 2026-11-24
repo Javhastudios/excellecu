@@ -54,14 +54,13 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAtt;
     juce::OwnedArray<MsButton> typeButtons, keyButtons;
     MsButton deleteButton { "Eliminar banda" };
-    MsButton exactButton { "Exacto" }, classicButton { juce::String::fromUTF8 ("Clásico") };
-    Row fc, gain, q, slope, win, ov;
+    Row fc, gain, q, slope;
 
     // A qué banda/juego/tipo están conectados los controles ahora
     int boundSlot = -2, boundKey = -1, boundType = -1;
     bool hasBand = false;
     juce::String countText;
-    juce::Rectangle<int> bandsTitle, emptyHint, bandBox, headRow, typeLabel, keyLabel, motorTitle, engineLabel, engineNote, dividers[2];
+    juce::Rectangle<int> bandsTitle, emptyHint, bandBox, headRow, typeLabel, keyLabel, motorTitle, engineNote, dividers[2];
     juce::String engineNoteText;
     int contentHeight = 800;
 };

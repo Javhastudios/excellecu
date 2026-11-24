@@ -3,9 +3,12 @@ cmake_minimum_required(VERSION 3.22)
 # Versión mínima de macOS (High Sierra). Tiene que ir ANTES de project() para que se aplique.
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Versión mínima de macOS")
 
-project(Excellecu VERSION 0.19.1 LANGUAGES C CXX)
+project(Excellecu VERSION 0.20.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+
+# Versión visible en la ventana (también en la prueba de humo, que no es un plugin)
+add_compile_definitions(EX_VERSION_STRING="${PROJECT_VERSION}")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Windows: el runtime de C++ va dentro del plugin (no hace falta instalar Visual C++ Redistributable)

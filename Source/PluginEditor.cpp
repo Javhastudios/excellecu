@@ -96,33 +96,10 @@ ControlsPanel::ControlsPanel (ExcellecuProcessor& p, ui::BandModel& m, std::func
     addAndMakeVisible (deleteButton);
     onToggle.onClick = [this] { if (proc.selected >= 0) { model.markEdited (proc.selected); onChange(); } };
 
-    // Motor: Exacto (convolución con zero-padding) o Clásico (STFT original)
-    auto setEngine = [this] (int e) {
-        if (auto* prm = proc.apvts.getParameter (ids::engine))
-        {
-            prm->beginChangeGesture();
-            prm->setValueNotifyingHost (prm->convertTo0to1 ((float) e));
-            prm->endChangeGesture();
-        }
-        onChange();
-    };
-    exactButton.setTooltip (u8 ("Convolución exacta con zero-padding: sin aliasing temporal ni huella de bloque"));
-    classicButton.setTooltip (u8 ("STFT original (Hann + overlap-add), con ventana periódica"));
-    exactButton.onClick = [setEngine] { setEngine (0); };
-    classicButton.onClick = [setEngine] { setEngine (1); };
-    addAndMakeVisible (exactButton);
-    addAndMakeVisible (classicButton);
-
     setupRow (fc, "Frecuencia");
     setupRow (gain, "Ganancia");
     setupRow (q, "Factor Q");
     setupRow (slope, "Pendiente");
-    setupRow (win, u8 ("Tamaño ventana"));
-    setupRow (ov, "Overlap");
-    win.paramId = ids::winSize;
-    ov.paramId = ids::overlap;
-    win.att = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, ids::winSize, win.slider);
-    ov.att = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, ids::overlap, ov.slider);
     for (Row* r : { &fc, &gain, &q, &slope })
         r->slider.onDragStart = [this] { if (proc.selected >= 0) model.markEdited (proc.selected); };
     refresh();
@@ -191,18 +168,9 @@ void ControlsPanel::refresh()
         slope.valueText = String (p.slope) + " dB/oct";
         for (Row* r : { &fc, &gain, &q, &slope }) r->slider.setAlpha (p.on ? 1.0f : 0.35f);
     }
-    win.valueText = proc.apvts.getParameter (ids::winSize)->getCurrentValueAsText();
-    ov.valueText = proc.apvts.getParameter (ids::overlap)->getCurrentValueAsText();
-    exactButton.setActive (prm.exact);
-    classicButton.setActive (! prm.exact);
-    ov.slider.setEnabled (! prm.exact);
-    ov.slider.setAlpha (prm.exact ? 0.35f : 1.0f);
-    const String note = prm.exact
-        ? u8 ("Exacto: filtro de ") + String (prm.n + 1) + u8 (" muestras (diseñado con FFT de ") + String (2 * prm.n)
-              + u8 ("), aplicado por convolución en particiones de ") + String (eq::PART)
-              + u8 (" muestras. El overlap no se usa. Latencia: ") + String (eq::latencyFor (prm.n, true)) + u8 (" muestras.")
-        : u8 ("Clásico: STFT con Hann periódica en análisis y síntesis. Usa 75 % de overlap para que las ventanas sumen plano. Latencia: ")
-              + String (prm.n) + u8 (" muestras.");
+    const String note = u8 ("Filtro de fase cero de ") + String (prm.n + 1) + u8 (" muestras (diseñado con FFT de ")
+                        + String (2 * prm.n) + u8 ("), aplicado por convolución en particiones de ") + String (eq::PART)
+                        + u8 (" muestras. Latencia: ") + String (eq::latencyFor (prm.n)) + u8 (" muestras.");
     if (note != engineNoteText) { engineNoteText = note; needLayout = true; }
 
     if (needLayout) resized();
@@ -291,13 +259,6 @@ void ControlsPanel::resized()
     y += 13;
     motorTitle = { 0, y, w, 16 };
     y += 26;
-    engineLabel = { 0, y, 40, 15 };
-    classicButton.setBounds (w - 54, y, 54, 15);
-    exactButton.setBounds (w - 54 - 3 - 48, y, 48, 15);
-    y += 25;
-    win.visible = ov.visible = true;
-    layoutRow (win, 0, y, w, 12);
-    layoutRow (ov, 0, y, w, 6);
     engineNote = { 0, y, w, 48 };
     y += 48;
     contentHeight = y + 8;
@@ -354,21 +315,10 @@ void ControlsPanel::paint (Graphics& g)
 
     g.setColour (theme::border);
     g.fillRect ((float) dividers[0].getX(), (float) dividers[0].getY(), (float) dividers[0].getWidth(), 0.6f);
-    panelTitle (g, motorTitle, "MOTOR DFT");
-    g.setColour (theme::muted);
-    g.setFont (theme::font (9.0f));
-    g.drawText ("MODO", engineLabel, Justification::centredLeft, false);
+    panelTitle (g, motorTitle, "MOTOR");
     g.setColour (theme::muted.withAlpha (0.8f));
+    g.setFont (theme::font (9.0f));
     g.drawFittedText (engineNoteText, engineNote, Justification::topLeft, 5, 1.0f);
-    for (const Row* row : { &win, &ov })
-    {
-        const float a = (row == &ov && ! ov.slider.isEnabled()) ? 0.35f : 1.0f;
-        g.setFont (theme::font (10.0f));
-        g.setColour (theme::muted.withMultipliedAlpha (a));
-        g.drawText (row->name, row->label, Justification::centredLeft, true);
-        g.setColour (theme::accent2.withMultipliedAlpha (a));
-        g.drawText (row->valueText, row->label, Justification::centredRight, true);
-    }
 }
 
 //==============================================================================
@@ -420,16 +370,15 @@ void ExcellecuEditor::refreshNow()
     const double sr = proc.sampleRateForUi();
     const int w = mag.getWidth();
     const bool changed = firstChart || ! prm.sameBands (shownParams) || prm.n != shownParams.n
-                      || prm.overlap != shownParams.overlap || prm.exact != shownParams.exact || sr != shownRate || w != shownWidth;
+                      || sr != shownRate || w != shownWidth;
     if (changed && w > 0)
     {
         firstChart = false;
         shownParams = prm; shownRate = sr; shownWidth = w;
         chart.compute (prm, sr, w);
-        const int hop = (int) std::floor (prm.n * (1 - prm.overlap));
-        const int lat = eq::latencyFor (prm.n, prm.exact);
+        const int lat = eq::latencyFor (prm.n);
         status = u8 ("latencia ") + String (lat) + " muestras (" + String (1000.0 * lat / sr, 1) + u8 (" ms) · ")
-               + (prm.exact ? u8 ("exacto, particiones de ") + String (eq::PART) : u8 ("clásico, hop ") + String (hop))
+               + u8 ("filtro de ") + String (prm.n + 1) + u8 (", particiones de ") + String (eq::PART)
                + u8 (" · ") + String (sr / 1000.0, 1) + " kHz";
         repaint();
     }
@@ -468,7 +417,7 @@ void ExcellecuEditor::paint (Graphics& g)
     };
     piece (u8 ("EQ — MOTOR "), theme::muted);
     piece ("DFT/IDFT", theme::accent);
-    piece (u8 (" — PROTOTIPO V0.18"), theme::muted);
+    piece (u8 (" — PROTOTIPO V") + String (EX_VERSION_STRING), theme::muted);
 
     // Tarjeta del módulo
     auto r = moduleArea.toFloat().reduced (0.5f);

@@ -26,13 +26,6 @@ NormalisableRange<float> logRange (float lo, float hi, float snapStep)
 AudioProcessorValueTreeState::ParameterLayout createLayout()
 {
     std::vector<std::unique_ptr<RangedAudioParameter>> p;
-    p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ids::winSize, 1 }, u8 ("Tamaño ventana"),
-                                                         StringArray { "512", "1024", "4096", "8192" }, 2));
-    p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ids::overlap, 1 }, "Overlap",
-                                                         StringArray { "25%", "50%", "75%" }, 1));
-    p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ids::engine, 1 }, "Motor",
-                                                         StringArray { "Exacto", u8 ("Clásico") }, 0));
-
     const StringArray types { "Campana", "Low shelf", "High shelf", "High pass", "Low pass" };
     const StringArray modes { u8 ("Estéreo"), "L", "R", "M", "S" };
     const StringArray slopes { "6 dB/oct", "12 dB/oct", "24 dB/oct", "48 dB/oct" };
@@ -85,9 +78,6 @@ ExcellecuProcessor::ExcellecuProcessor()
             sp.slope = apvts.getRawParameterValue (ids::set (b, k, "slope"));
         }
     }
-    winPtr = apvts.getRawParameterValue (ids::winSize);
-    ovPtr = apvts.getRawParameterValue (ids::overlap);
-    enginePtr = apvts.getRawParameterValue (ids::engine);
 
     engine.setParams (currentParams());
     setLatencySamples (engine.latency());
@@ -118,9 +108,7 @@ eq::Params ExcellecuProcessor::currentParams() const
             s.slope = eq::SLOPES[(size_t) idx (sp.slope, 4)];
         }
     }
-    p.n = eq::N_OPTIONS[(size_t) idx (winPtr, 4)];
-    p.overlap = eq::OV_OPTIONS[(size_t) idx (ovPtr, 3)];
-    p.exact = idx (enginePtr, 2) == 0;
+    p.n = kWindow;
     return p;
 }
 

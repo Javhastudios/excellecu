@@ -5,8 +5,8 @@
 //   node tests/run_js.mjs <carpeta-salida>
 //
 // La web rellena con silencio el principio, así que su resultado es "en régimen" desde la
-// primera muestra: se compara el archivo entero. Cada escenario se ejecuta con los dos motores
-// de la web v0.18: Clásico (nombre tal cual) y Exacto (prefijo "x_").
+// primera muestra: se compara el archivo entero. Cada escenario se ejecuta con el motor Exacto
+// de la web (prefijo "x_"), el único que tiene el plugin desde la v0.20.
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
@@ -104,10 +104,7 @@ scenarios.hpf_graves = { N: 8192, overlap: 0.75, bands: [
   { type: 'bell', edit: 's', s: { fc: 100, gain: -6, q: 1 } },
 ] };
 const runs = [];
-for (const [name, sc] of Object.entries(scenarios)) {
-  runs.push([name, sc, 'classic']);
-  runs.push(['x_' + name, sc, 'exact']);
-}
+for (const [name, sc] of Object.entries(scenarios)) runs.push(['x_' + name, sc, 'exact']);
 for (const [name, sc, engineMode] of runs) {
   const ctx = vm.createContext({
     document: { getElementById: () => element(), createElement: () => element(), activeElement: null },

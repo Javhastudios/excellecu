@@ -1,6 +1,6 @@
 // Ejecuta el motor C++ (en tiempo real, en bloques de 256) con los guiones que genera
-// run_js.mjs y guarda la salida alineada con la de la web. Motor Clásico o Exacto según el
-// guion; en los dos la muestra q del original sale N muestras después.
+// run_js.mjs (motor Exacto de la web) y guarda la salida alineada con la de la web: la muestra
+// q del original sale latency() muestras después.
 //   g++ -std=c++17 -O2 -I Source -o compare_cpp tests/compare_cpp.cpp && ./compare_cpp <carpeta>
 #include "dsp/EqEngine.h"
 
@@ -40,8 +40,7 @@ int main (int argc, char** argv)
             ls >> key;
             if (key == "channels") ls >> channels;
             else if (key == "N") ls >> p.n;
-            else if (key == "overlap") ls >> p.overlap;
-            else if (key == "engine") { std::string e; ls >> e; p.exact = e == "exact"; }
+            else if (key == "overlap" || key == "engine") {}   // solo los usa la web
             else if (key == "band")
             {
                 int slot, type, edit;
@@ -84,7 +83,7 @@ int main (int argc, char** argv)
                 out[(size_t) (c * frames + q)] = (c == 0 ? L : R)[(size_t) (D + q + N)];
         std::ofstream fo (dir + "/" + name + ".cpp.f32", std::ios::binary);
         fo.write ((const char*) out.data(), (std::streamsize) (out.size() * 4));
-        std::cout << "C++ " << name << ": motor " << (p.exact ? "exacto" : "clasico") << ", hop " << hop << ", latencia " << N << "\n";
+        std::cout << "C++ " << name << ": bloque " << hop << ", latencia " << N << "\n";
     }
     return 0;
 }
