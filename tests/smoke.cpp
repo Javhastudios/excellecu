@@ -319,6 +319,18 @@ int main (int argc, char** argv)
         MessageManager::getInstance()->runDispatchLoopUntil (200);
         snapshot (*ed, outDir.getChildFile ("04_filtro.png"));
         ed.reset();
+
+        // Reabrir la ventana con una banda seleccionada (antes se colgaba: el botón "Activa"
+        // refrescaba la ventana a medio construir)
+        for (int sel : { 0, 2, 3, -1 })
+        {
+            p.selected = sel;
+            ed.reset (p.createEditor());
+            ed->setSize (1100, 780);
+            MessageManager::getInstance()->runDispatchLoopUntil (100);
+            ed.reset();
+        }
+        check (true, "reabrir la ventana con banda seleccionada (0, 2, 3) y sin selección");
     }
 
     std::cout << (failures == 0 ? "TODO BIEN" : String (failures) + " fallo(s)") << std::endl;

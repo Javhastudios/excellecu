@@ -11,6 +11,18 @@ zero-padding, por defecto) y Clásico (FFT → ganancia por bin → FFT inversa 
 Original: `web/eq-dft-proto.html` (v0.18, "50 motor exacto"). Objetivo: medirlo en Plugin
 Doctor y seguir iterando.
 
+## v0.19.1 (24/11/2026): cuelgue al reabrir la ventana y ventana lenta
+
+- Cuelgue (Ableton, VST3, Mac): al abrir la ventana con una banda seleccionada, el botón
+  "Activa" avisaba al conectarse a su parámetro y eso refrescaba la ventana a medio construir
+  (`newTypeButtons` aún vacío). Venía de antes de la v0.19. Arreglo: `refreshNow` no hace nada
+  hasta que termina el constructor (`constructed`, declarado antes de los componentes).
+  Prueba de humo nueva: reabrir la ventana con banda seleccionada y sin selección.
+- Ventana lenta (~8 s en abrir y otros ~8 en responder en Ableton): la gráfica de fase dibujaba
+  un punto por bin (4096 con ventana 8192), casi todos en los agudos saltando entre ±180°, y
+  además a trazos. Ahora, como mucho, un punto por píxel. Medido aquí: pintar la ventana entera
+  pasa de ~1,2 s a ~0,37 s en depuración y queda en ~20 ms en la compilación normal.
+
 ## v0.19 (24/11/2026): convolución particionada en el motor Exacto
 
 - Motivo: en Plugin Doctor (pestaña Performance) el motor Exacto salía "en escalera": cada N/2

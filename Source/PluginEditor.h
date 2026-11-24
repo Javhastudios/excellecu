@@ -82,6 +82,9 @@ private:
     void timerCallback() override;
 
     ExcellecuProcessor& proc;
+    // Va antes que los componentes: se consulta mientras se construyen (los miembros se
+    // inicializan en el orden en que están declarados)
+    bool constructed = false;   // true al terminar el constructor
     ui::BandModel model;
     EqLookAndFeel lnf;
     ControlsPanel controls;

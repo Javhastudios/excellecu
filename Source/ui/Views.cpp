@@ -586,19 +586,26 @@ void PhaseView::paint (Graphics& g)
     auto toY = [&] (double deg) { return t + ph - (float) ((jlimit (-180.0, 180.0, deg) + 180) / 360) * ph; };
     auto toX = [&] (double f) { return l + (float) ((std::log10 (f) - fMin) / (fMax - fMin)) * pw; };
 
+    // Como mucho un punto por píxel: con N = 8192 hay 4096 bins, casi todos apretados en los
+    // agudos y saltando entre ±180°; dibujarlos todos (y además a trazos) bloqueaba la interfaz.
     Path before, after;
     bool s1 = false, s2 = false;
-    for (size_t k = 1; k < d.phaseBefore.size(); ++k)
+    const size_t bins = d.phaseBefore.size();
+    size_t lastK = 0;
+    const int cols = std::max (1, (int) pw);
+    for (int px = 0; px <= cols; ++px)
     {
-        const double f = (double) k * binHz;
-        if (f < 20 || f > 20000) continue;
-        const float x = toX (f);
+        const double f = std::pow (10.0, fMin + (fMax - fMin) * px / cols);
+        const size_t k = (size_t) std::lround (f / binHz);
+        if (k < 1 || k >= bins || k == lastK) continue;
+        lastK = k;
+        const float x = toX ((double) k * binHz);
         if (! s1) { before.startNewSubPath (x, toY (d.phaseBefore[k])); s1 = true; } else before.lineTo (x, toY (d.phaseBefore[k]));
         if (d.phaseMag[k] < 0.001) continue;
         if (! s2) { after.startNewSubPath (x, toY (d.phaseAfter[k])); s2 = true; } else after.lineTo (x, toY (d.phaseAfter[k]));
     }
     g.setColour (theme::accent);
-    g.strokePath (before, PathStrokeType (1.5f, PathStrokeType::curved));
+    g.strokePath (before, PathStrokeType (1.5f, PathStrokeType::mitered));
     g.setColour (theme::warn);
     strokeDashed (g, after, 1.5f, 4, 3);
 

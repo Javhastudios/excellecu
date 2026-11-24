@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 # Versión mínima de macOS (High Sierra). Tiene que ir ANTES de project() para que se aplique.
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Versión mínima de macOS")
 
-project(Excellecu VERSION 0.19.0 LANGUAGES C CXX)
+project(Excellecu VERSION 0.19.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

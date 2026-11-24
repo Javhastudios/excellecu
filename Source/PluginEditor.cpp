@@ -400,6 +400,7 @@ ExcellecuEditor::ExcellecuEditor (ExcellecuProcessor& p)
     setResizable (true, true);
     setResizeLimits (900, 620, 2000, 1600);
     setSize (1100, 780);
+    constructed = true;
     refreshNow();
     startTimerHz (30);
 }
@@ -408,6 +409,9 @@ ExcellecuEditor::~ExcellecuEditor() { setLookAndFeel (nullptr); }
 
 void ExcellecuEditor::refreshNow()
 {
+    // Al construir la ventana, conectar los controles de la banda seleccionada dispara avisos
+    // que llaman aquí antes de que existan todos los componentes: se ignoran hasta el final.
+    if (! constructed) return;
     if (proc.selected >= 0 && ! model.used (proc.selected)) proc.selected = -1;
     for (int t = 0; t < eq::NUM_TYPES; ++t) newTypeButtons[t]->setActive (t == proc.newBandType);
     controls.refresh();
