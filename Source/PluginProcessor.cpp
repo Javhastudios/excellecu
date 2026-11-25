@@ -52,16 +52,43 @@ AudioProcessorValueTreeState::ParameterLayout createLayout()
             p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ids::set (b, k, "slope"), 1 }, kp + "pendiente", slopes, 1));
         }
     }
+
+    // Salida: ganancia de L y R, luego de Mid y Side. Las cuatro actúan siempre; el modo solo
+    // elige qué pareja se ve y se edita, así cambiar de modo no altera lo que suena.
+    p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { "out_mode", 1 }, "Salida modo", StringArray { "L/R", "M/S" }, 0));
+    p.push_back (std::make_unique<AudioParameterBool> (ParameterID { "out_link", 1 }, "Salida enlazar", true));
+    const char* outNames[] = { "Salida L", "Salida R", "Salida Mid", "Salida Side" };
+    const char* outIds[] = { "out_l", "out_r", "out_m", "out_s" };
+    for (int i = 0; i < 4; ++i)
+        p.push_back (std::make_unique<AudioParameterFloat> (
+            ParameterID { outIds[i], 1 }, outNames[i], NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
+            AudioParameterFloatAttributes().withLabel ("dB").withStringFromValueFunction ([] (float v, int) { return fmt::gain (v); })));
     return { p.begin(), p.end() };
 }
 } // namespace
+
+void ExcellecuProcessor::Meter::add (const float* x, int n)
+{
+    float pk = 0, ss = 0;
+    for (int i = 0; i < n; ++i) { const float a = std::abs (x[i]); pk = jmax (pk, a); ss += x[i] * x[i]; }
+    // Sin bloqueos: si la interfaz recoge justo entre la lectura y la escritura se pierde un
+    // bloque de medida, nada más.
+    if (pk > peak.load (std::memory_order_relaxed)) peak.store (pk, std::memory_order_relaxed);
+    sumSq.store (sumSq.load (std::memory_order_relaxed) + ss, std::memory_order_relaxed);
+    count.fetch_add (n, std::memory_order_relaxed);
+}
 
 ExcellecuProcessor::ExcellecuProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Entrada", AudioChannelSet::stereo(), true)
                           .withOutput ("Salida", AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "PARAMS", createLayout())
+      apvts (*this, nullptr, "PARAMS", createLayout()),
+      history (*this, { [this] { return lrFreshMask(); }, [this] (int m) { setLrFreshMask (m); } })
 {
+    history.setSelectionAccess ([this] { return selected; }, [this] (int s) { selected = s; });
+    const char* outIds[] = { "out_l", "out_r", "out_m", "out_s" };
+    for (int i = 0; i < 4; ++i) outPtr[i] = apvts.getRawParameterValue (outIds[i]);
+
     for (int b = 0; b < eq::MAX_BANDS; ++b)
     {
         auto& bp = ptrs[(size_t) b];
@@ -82,6 +109,7 @@ ExcellecuProcessor::ExcellecuProcessor()
     engine.setParams (currentParams());
     setLatencySamples (engine.latency());
     reportedLatency = engine.latency();
+    presetValues = currentValues();
     startTimerHz (10);
 }
 
@@ -126,6 +154,11 @@ void ExcellecuProcessor::prepareToPlay (double sampleRate, int)
     wantedLatency = engine.latency();
     reportedLatency = engine.latency();
     setLatencySamples (engine.latency());
+    for (int i = 0; i < 4; ++i)
+    {
+        outSmooth[(size_t) i].reset (sampleRate, 0.05);   // 50 ms: sin clics al mover la ganancia
+        outSmooth[(size_t) i].setCurrentAndTargetValue (Decibels::decibelsToGain (outPtr[i]->load()));
+    }
     kernelThread.startThread();
 }
 
@@ -150,7 +183,65 @@ void ExcellecuProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
     // calculan aquí mismo, para que el resultado no dependa de la velocidad del render.
     engine.setAsyncKernels (! isNonRealtime() && kernelThread.isThreadRunning());
     wantedLatency = engine.latency();
-    engine.process (buffer.getArrayOfWritePointers(), jmin (2, buffer.getNumChannels()), buffer.getNumSamples());
+    const int nc = jmin (2, buffer.getNumChannels()), ns = buffer.getNumSamples();
+    meterChannels.store (nc, std::memory_order_relaxed);
+    for (int c = 0; c < nc; ++c) inMeter[(size_t) c].add (buffer.getReadPointer (c), ns);
+    engine.process (buffer.getArrayOfWritePointers(), nc, ns);
+    applyOutputGain (buffer.getArrayOfWritePointers(), nc, ns);
+    for (int c = 0; c < nc; ++c) outMeter[(size_t) c].add (buffer.getReadPointer (c), ns);
+}
+
+void ExcellecuProcessor::applyOutputGain (float* const* ch, int numCh, int numSamples)
+{
+    bool moving = false, unity = true;
+    for (int i = 0; i < 4; ++i)
+    {
+        auto& sm = outSmooth[(size_t) i];
+        sm.setTargetValue (Decibels::decibelsToGain (outPtr[i]->load()));
+        moving = moving || sm.isSmoothing();
+        unity = unity && sm.getTargetValue() == 1.0f;
+    }
+    if (! moving && unity) return;
+
+    if (numCh < 2)
+    {
+        // Mono: la señal es solo Mid (Side = 0), así que actúan L y Mid
+        float* x = ch[0];
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float gl = outSmooth[0].getNextValue();
+            outSmooth[1].skip (1);
+            const float gm = outSmooth[2].getNextValue();
+            outSmooth[3].skip (1);
+            x[i] *= gl * gm;
+        }
+        return;
+    }
+    float* l = ch[0];
+    float* r = ch[1];
+    if (! moving)
+    {
+        const float gl = outSmooth[0].getTargetValue(), gr = outSmooth[1].getTargetValue();
+        const float gm = outSmooth[2].getTargetValue(), gs = outSmooth[3].getTargetValue();
+        if (gm == gs)
+        {
+            for (int i = 0; i < numSamples; ++i) { l[i] *= gl * gm; r[i] *= gr * gm; }
+            return;
+        }
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float a = l[i] * gl, b = r[i] * gr;
+            const float m = 0.5f * (a + b) * gm, s = 0.5f * (a - b) * gs;
+            l[i] = m + s; r[i] = m - s;
+        }
+        return;
+    }
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float a = l[i] * outSmooth[0].getNextValue(), b = r[i] * outSmooth[1].getNextValue();
+        const float m = 0.5f * (a + b) * outSmooth[2].getNextValue(), s = 0.5f * (a - b) * outSmooth[3].getNextValue();
+        l[i] = m + s; r[i] = m - s;
+    }
 }
 
 void ExcellecuProcessor::timerCallback()
@@ -173,6 +264,64 @@ void ExcellecuProcessor::setLrFresh (int slot, bool fresh)
     apvts.state.setProperty ("lrFresh", mask, nullptr);
 }
 
+int ExcellecuProcessor::lrFreshMask() const { return apvts.state.getProperty ("lrFresh", 0xfff); }
+void ExcellecuProcessor::setLrFreshMask (int mask) { apvts.state.setProperty ("lrFresh", mask & 0xfff, nullptr); }
+
+std::vector<float> ExcellecuProcessor::currentValues() const
+{
+    std::vector<float> v;
+    for (auto* prm : getParameters()) v.push_back (prm->getValue());
+    return v;
+}
+
+void ExcellecuProcessor::applyPreset (const std::vector<float>& values, int lrFresh, const String& name)
+{
+    const auto& params = getParameters();
+    for (int i = 0; i < params.size() && i < (int) values.size(); ++i)
+    {
+        auto* prm = params[i];
+        if (prm->getValue() == values[(size_t) i]) continue;
+        prm->beginChangeGesture();
+        prm->setValueNotifyingHost (values[(size_t) i]);
+        prm->endChangeGesture();
+    }
+    // lrFresh va en el mismo paso de deshacer: el historial lo lee al cerrar el paso
+    setLrFreshMask (lrFresh);
+    apvts.state.setProperty ("presetName", name, nullptr);
+    presetValues = currentValues();
+    if (selected >= 0 && apvts.getRawParameterValue (ids::band (selected, "used"))->load() < 0.5f) selected = -1;
+}
+
+void ExcellecuProcessor::setPresetSaved (const String& name)
+{
+    apvts.state.setProperty ("presetName", name, nullptr);
+    presetValues = currentValues();
+}
+
+bool ExcellecuProcessor::presetModified() const
+{
+    const auto& params = getParameters();
+    if (presetValues.size() != (size_t) params.size()) return false;
+    for (int i = 0; i < params.size(); ++i)
+    {
+        // Las bandas que no existen no cuentan (sus valores no suenan)
+        if (std::abs (params[i]->getValue() - presetValues[(size_t) i]) > 1e-5f)
+        {
+            if (auto* r = dynamic_cast<RangedAudioParameter*> (params[i]))
+            {
+                const auto id = r->getParameterID();
+                if (id.startsWithChar ('b') && ! id.endsWith ("_used"))
+                {
+                    const int b = id.substring (1).getIntValue() - 1;
+                    if (apvts.getRawParameterValue (ids::band (b, "used"))->load() < 0.5f) continue;
+                }
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 void ExcellecuProcessor::getStateInformation (MemoryBlock& destData)
 {
     auto state = apvts.copyState();
@@ -182,7 +331,13 @@ void ExcellecuProcessor::getStateInformation (MemoryBlock& destData)
 void ExcellecuProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
-        if (xml->hasTagName (apvts.state.getType())) apvts.replaceState (ValueTree::fromXml (*xml));
+        if (xml->hasTagName (apvts.state.getType()))
+        {
+            apvts.replaceState (ValueTree::fromXml (*xml));
+            // Sesión nueva: el historial anterior no vale y el preset cuenta como sin modificar
+            history.clear();
+            presetValues = currentValues();
+        }
 }
 
 AudioProcessorEditor* ExcellecuProcessor::createEditor() { return new ExcellecuEditor (*this); }

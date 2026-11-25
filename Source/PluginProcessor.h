@@ -3,6 +3,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include "dsp/EqEngine.h"
+#include "state/UndoHistory.h"
 
 namespace ids
 {
@@ -57,6 +58,28 @@ public:
     // "L y R parten de Estéreo mientras no se hayan tocado" (lrFresh de la web), por hueco
     bool isLrFresh (int slot) const;
     void setLrFresh (int slot, bool fresh);
+    int lrFreshMask() const;
+    void setLrFreshMask (int mask);
+
+    // Deshacer / rehacer (solo cambios hechos desde la interfaz)
+    UndoHistory history;
+
+    // Medidores: el audio acumula pico y suma de cuadrados; la interfaz los recoge y los pone a 0
+    struct Meter
+    {
+        std::atomic<float> peak { 0 }, sumSq { 0 };
+        std::atomic<int> count { 0 };
+        void add (const float* x, int n);
+    };
+    std::array<Meter, 2> inMeter, outMeter;
+    std::atomic<int> meterChannels { 2 };
+
+    // Presets: aplica valores normalizados (todos los parámetros) desde la interfaz, como un solo
+    // paso de deshacer. El nombre se guarda con la sesión.
+    void applyPreset (const std::vector<float>& values, int lrFresh, const juce::String& name);
+    juce::String presetName() const { return apvts.state.getProperty ("presetName", "Plano").toString(); }
+    bool presetModified() const;
+    void setPresetSaved (const juce::String& name);   // tras guardar: ese es ahora el preset actual   // ¿difiere el estado del último preset cargado?
 
 private:
     void timerCallback() override;
@@ -79,6 +102,14 @@ private:
         ExcellecuProcessor& proc;
         eq::KernelBuilder builder;
     };
+
+    void applyOutputGain (float* const* ch, int numCh, int numSamples);
+    std::vector<float> currentValues() const;
+
+    // Ganancia de salida: L/R y luego M/S, con suavizado (en ganancia lineal)
+    std::atomic<float>* outPtr[4] {};
+    std::array<juce::LinearSmoothedValue<float>, 4> outSmooth;
+    std::vector<float> presetValues;   // valores del último preset cargado (para "modificado")
 
     struct SetPtrs { std::atomic<float>* on; std::atomic<float>* fc; std::atomic<float>* gain; std::atomic<float>* q; std::atomic<float>* slope; };
     struct BandPtrs { std::atomic<float>* used; std::atomic<float>* type; std::atomic<float>* edit; std::array<SetPtrs, eq::NUM_KEYS> sets; };

@@ -1,9 +1,12 @@
 // Prueba de humo del plugin completo: latencia, HPF en graves, filtros en tiempo real, bandas de cada tipo,
+// ganancia de salida L/R–M/S, medidores, deshacer, presets,
 // modos L/R y M/S, límite de 12 bandas, estado guardado, mono y capturas de la interfaz.
 //   ex_smoke <carpeta-salida>
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 #include "ui/BandModel.h"
+#include "ui/Meters.h"
+#include "state/Presets.h"
 
 #include <iostream>
 
@@ -19,6 +22,15 @@ static void check (bool ok, const String& what)
     std::cout << (ok ? "  ok  " : "  FALLO ") << bytes << std::endl;
     if (! ok) ++failures;
 }
+
+static void setPlain (ExcellecuProcessor& p, const char* id, float v)
+{
+    auto* prm = p.apvts.getParameter (id);
+    prm->beginChangeGesture();
+    prm->setValueNotifyingHost (prm->convertTo0to1 (v));
+    prm->endChangeGesture();
+}
+static float plain (ExcellecuProcessor& p, const juce::String& id) { return p.apvts.getRawParameterValue (id)->load(); }
 
 // Procesa len muestras de gen(i, canal) en bloques de 480; devuelve los canales de salida.
 // Sin tiempo real: los filtros del motor Exacto se calculan en el propio proceso, así el
@@ -248,6 +260,259 @@ int main (int argc, char** argv)
         check (std::abs (rmsDb (o[0], 20000, 40000, sineRms) + 6) < 0.2, "en mono se aplican las bandas Mid (como la web)");
     }
 
+
+    {
+        std::cout << "Ganancia de salida" << std::endl;
+        ExcellecuProcessor p;
+        p.prepareToPlay (SR, 480);
+        setPlain (p, "out_l", 6.0f);
+        auto o = run (p, 40000, sine (1000));
+        const double l = rmsDb (o[0], 20000, 40000, sineRms), r = rmsDb (o[1], 20000, 40000, sineRms);
+        check (std::abs (l - 6) < 0.05 && std::abs (r) < 0.05, "L/R: L +6 dB, R 0 dB (" + String (l, 2) + " / " + String (r, 2) + ")");
+
+        setPlain (p, "out_l", 0.0f);
+        setPlain (p, "out_s", 6.0f);
+        setPlain (p, "out_mode", 1.0f);
+        auto mid = run (p, 40000, sine (1000));                                                       // L = R: solo Mid
+        auto side = run (p, 40000, [] (int i, int c) { return (c == 0 ? 1.0f : -1.0f) * sine (1000) (i, c); }); // L = −R: solo Side
+        const double dm = rmsDb (mid[0], 20000, 40000, sineRms), ds = rmsDb (side[0], 20000, 40000, sineRms);
+        check (std::abs (dm) < 0.05 && std::abs (ds - 6) < 0.05, "M/S: Mid 0 dB, Side +6 dB (" + String (dm, 2) + " / " + String (ds, 2) + ")");
+
+        // Cambiar el modo solo cambia qué pareja se edita: lo que suena es igual
+        setPlain (p, "out_mode", 0.0f);
+        auto side2 = run (p, 40000, [] (int i, int c) { return (c == 0 ? 1.0f : -1.0f) * sine (1000) (i, c); });
+        check (std::abs (rmsDb (side2[0], 20000, 40000, sineRms) - 6) < 0.05, "volver a L/R no quita la ganancia de Side");
+
+        // Suavizado: un salto de −24 dB a mitad de bloque no deja escalones
+        setPlain (p, "out_s", 0.0f);
+        p.setNonRealtime (false);
+        AudioBuffer<float> buf (2, 480);
+        MidiBuffer midi;
+        float last = 0, maxStep = 0;
+        const float sineStep = (float) (0.25 * 2 * eq::PI * 1000 / SR);
+        for (int blk = 0; blk < 200; ++blk)
+        {
+            if (blk == 120) setPlain (p, "out_l", -24.0f);
+            for (int i = 0; i < 480; ++i) for (int c = 0; c < 2; ++c) buf.setSample (c, i, sine (1000) (blk * 480 + i, c));
+            p.processBlock (buf, midi);
+            for (int i = 0; i < 480; ++i)
+            {
+                if (blk > 100) maxStep = std::max (maxStep, std::abs (buf.getSample (0, i) - last));
+                last = buf.getSample (0, i);
+            }
+        }
+        check (maxStep <= sineStep * 1.01f, "ganancia suavizada, sin saltos (paso máximo " + String (maxStep, 4) + ")");
+        check (std::abs (rmsDb (std::vector<float> (buf.getReadPointer (0), buf.getReadPointer (0) + 480), 0, 480, sineRms) + 24) < 0.1,
+               "tras el suavizado, L a −24 dB");
+
+        // Mono: actúan L y Mid
+        ExcellecuProcessor q;
+        AudioProcessor::BusesLayout mono;
+        mono.inputBuses.add (AudioChannelSet::mono());
+        mono.outputBuses.add (AudioChannelSet::mono());
+        q.setBusesLayout (mono);
+        q.prepareToPlay (SR, 480);
+        setPlain (q, "out_l", -3.0f);
+        setPlain (q, "out_m", -3.0f);
+        setPlain (q, "out_s", 12.0f);
+        auto om = run (q, 40000, sine (1000), 1);
+        check (std::abs (rmsDb (om[0], 20000, 40000, sineRms) + 6) < 0.05, "mono: L −3 y Mid −3 dan −6 dB (Side no actúa)");
+    }
+
+    {
+        std::cout << "Medidores" << std::endl;
+        ExcellecuProcessor p;
+        p.prepareToPlay (SR, 480);
+        setPlain (p, "out_r", -6.0f);
+        run (p, 48000, sine (1000, 0.5));
+        const float inPk = p.inMeter[0].peak.load(), outL = p.outMeter[0].peak.load(), outR = p.outMeter[1].peak.load();
+        check (std::abs (inPk - 0.5f) < 0.001f, "pico de entrada 0,5 (" + String (inPk, 4) + ")");
+        check (std::abs (outL - 0.5f) < 0.002f && std::abs (outR - 0.25f) < 0.002f, "pico de salida L 0,5 y R 0,25 (−6 dB)");
+        MeterView mv (p);
+        mv.tick();
+        const auto& ch = mv.channel (1, 1);
+        check (std::abs (ch.peakDb + 12.04f) < 0.1f, "medidor de salida R: pico " + String (ch.peakDb, 2) + " dBFS");
+        // RMS de todo lo recogido: incluye las 4352 muestras de silencio de la latencia
+        const float wantRms = (float) (20 * std::log10 (0.25 / std::sqrt (2.0)) + 10 * std::log10 ((48000.0 - 4352) / 48000.0));
+        check (std::abs (ch.rmsDb - wantRms) < 0.05f, "medidor de salida R: RMS " + String (ch.rmsDb, 2) + " dBFS (esperado " + String (wantRms, 2) + ")");
+        check (p.inMeter[0].count.load() == 0, "el medidor recoge y pone a cero");
+        run (p, 4800, sine (1000, 1.2));
+        mv.tick();
+        check (mv.channel (0, 0).clip && mv.channel (1, 0).clip, "saturación encendida con picos por encima de 0 dBFS");
+    }
+
+    {
+        std::cout << "Deshacer y rehacer" << std::endl;
+        ExcellecuProcessor p;
+        p.prepareToPlay (SR, 480);
+        ui::BandModel m (p);
+        auto& h = p.history;
+        const int b = m.create (eq::Bell, 1000, 6);
+        h.flush();
+        check (h.undoCount() == 1, "crear una banda es un solo paso (toca ~30 parámetros)");
+
+        // Arrastre: muchos movimientos dentro de un gesto = un paso
+        const auto fcId = ids::set (b, eq::St, "fc");
+        m.begin (fcId);
+        for (int i = 1; i <= 20; ++i) m.setLive (fcId, 1000.0f + 50.0f * i);
+        m.end (fcId);
+        h.flush();
+        check (h.undoCount() == 2 && std::abs (plain (p, fcId) - 2000) < 1, "un arrastre entero es un solo paso");
+
+        // Automatización (sin gesto): no entra en el historial
+        auto* g = p.apvts.getParameter (ids::set (b, eq::St, "gain"));
+        g->setValueNotifyingHost (g->convertTo0to1 (3.0f));
+        h.flush();
+        check (h.undoCount() == 2, "la automatización del DAW no se apunta");
+
+        // Rueda: cambios seguidos del mismo control se juntan
+        m.set (ids::set (b, eq::St, "q"), 1.2f);
+        h.flush();
+        m.set (ids::set (b, eq::St, "q"), 1.4f);
+        h.flush();
+        check (h.undoCount() == 3, "dos toques seguidos de la misma Q se juntan en un paso");
+
+        h.undo();
+        check (std::abs (plain (p, ids::set (b, eq::St, "q")) - 1) < 1e-4, "deshacer la Q vuelve a 1,00");
+        check (std::abs (plain (p, ids::set (b, eq::St, "gain")) - 3) < 1e-4, "deshacer no pisa lo que movió la automatización");
+        h.undo();
+        check (std::abs (plain (p, fcId) - 1000) < 1, "deshacer el arrastre vuelve a 1 kHz");
+        p.selected = -1;
+        h.undo();
+        check (! m.used (b) && m.count() == 0, "deshacer la creación quita la banda");
+        check (! h.undo(), "no hay más pasos que deshacer");
+        h.redo();
+        check (m.used (b) && std::abs (m.band (b).sets[eq::St].gain - 6) < 1e-4 && p.selected == b,
+               "rehacer devuelve la banda (+6 dB) y la selecciona");
+        h.redo();
+        h.redo();
+        check (std::abs (plain (p, ids::set (b, eq::St, "q")) - 1.4) < 1e-4, "rehacer hasta el final");
+
+        m.remove (b);
+        h.flush();
+        h.undo();
+        check (m.used (b) && p.selected == b, "deshacer un borrado devuelve la banda seleccionada");
+        m.setMode (b, eq::L);
+        m.set (ids::set (b, eq::L, "gain"), -2.0f);
+        m.markEdited (b);
+        h.flush();
+        check (! p.isLrFresh (b), "editar L marca la banda como editada (lrFresh)");
+        h.undo();
+        check (p.isLrFresh (b), "deshacer devuelve también lrFresh");
+        check (h.canRedo(), "tras deshacer se puede rehacer");
+        m.set (ids::set (b, eq::St, "gain"), 1.0f);
+        h.flush();
+        check (! h.canRedo(), "un cambio nuevo borra lo que había para rehacer");
+
+        for (int i = 0; i < 130; ++i) { m.set (ids::set (b, eq::St, "fc"), 100.0f + i); h.flush(); Thread::sleep (i < 2 ? 450 : 0); }
+        check (h.undoCount() <= UndoHistory::MAX_STEPS, "como mucho " + String (UndoHistory::MAX_STEPS) + " pasos (" + String (h.undoCount()) + ")");
+
+        MemoryBlock st;
+        p.getStateInformation (st);
+        p.setStateInformation (st.getData(), (int) st.getSize());
+        check (! h.canUndo() && ! h.canRedo(), "cargar una sesión vacía el historial");
+    }
+
+    {
+        std::cout << "Presets" << std::endl;
+        const File tmp = File::getSpecialLocation (File::tempDirectory).getChildFile ("excellecu-smoke.excellecu");
+        ExcellecuProcessor p;
+        p.prepareToPlay (SR, 480);
+        ui::BandModel m (p);
+        const int a = m.create (eq::Bell, 64, 5);
+        m.set (ids::set (a, eq::St, "q"), 0.7f);
+        const int c = m.create (eq::HighShelf, 9000, 2);
+        m.setMode (c, eq::S);
+        m.set (ids::set (c, eq::S, "gain"), 1.5f);
+        m.create (eq::HighPass, 30, 0);
+        setPlain (p, "out_m", -1.5f);
+        check (presets::save (p, tmp, "Prueba"), "guardar preset en archivo");
+        auto xml = parseXML (tmp);
+        check (xml != nullptr && xml->getIntAttribute ("version") == presets::FORMAT_VERSION, "el archivo lleva número de versión");
+        check (xml != nullptr && xml->getChildByAttribute ("id", "b5_used") == nullptr, "no guarda las bandas vacías");
+
+        ExcellecuProcessor q;
+        q.prepareToPlay (SR, 480);
+        ui::BandModel mq (q);
+        mq.create (eq::LowPass, 5000, 0);          // algo distinto que el preset debe quitar
+        setPlain (q, "out_l", 3.0f);
+        q.history.flush();
+        const int stepsBefore = q.history.undoCount();
+        std::vector<float> vals;
+        int fresh = 0;
+        check (presets::decode (q, *xml, vals, fresh), "leer el preset");
+        q.applyPreset (vals, fresh, "Prueba");
+        q.history.flush();
+        bool same = true;
+        for (auto* prm : p.getParameters())
+        {
+            const auto id = dynamic_cast<RangedAudioParameter*> (prm)->getParameterID();
+            if (id.startsWithChar ('b') && plain (p, ids::band (id.substring (1).getIntValue() - 1, "used")) < 0.5f) continue;
+            same = same && std::abs (plain (p, id) - plain (q, id)) < 1e-3f * std::max (1.0f, std::abs (plain (p, id)));
+        }
+        check (same, "el preset carga igual en otra instancia (bandas, M/S y salida)");
+        check (plain (q, "out_l") == 0.0f, "lo que no está en el preset vuelve a su valor por defecto");
+        check (q.presetName() == "Prueba" && ! q.presetModified(), "nombre del preset y sin modificar");
+        check (q.history.undoCount() == stepsBefore + 1, "cargar un preset es un solo paso de deshacer");
+        auto o1 = run (p, 30000, sine (64)), o2 = run (q, 30000, sine (64));
+        check (std::abs (rmsDb (o1[0], 15000, 30000, 1) - rmsDb (o2[0], 15000, 30000, 1)) < 0.01, "suena igual que el original");
+
+        setPlain (q, "out_s", 1.0f);
+        check (q.presetModified(), "al cambiar algo aparece como modificado");
+        q.history.flush();
+        q.history.undo();
+        check (! q.presetModified(), "deshacer el cambio vuelve a «sin modificar»");
+        q.history.undo();
+        check (plain (q, "out_l") == 3.0f && mq.count() == 1, "deshacer la carga del preset recupera lo anterior");
+
+        // Preset antiguo sin la sección de salida: carga y la salida queda a 0 dB
+        xml->deleteAllChildElementsWithTagName ("P");
+        auto* e = xml->createNewChildElement ("P"); e->setAttribute ("id", "b1_used"); e->setAttribute ("v", 1);
+        auto* e2 = xml->createNewChildElement ("P"); e2->setAttribute ("id", "b1_st_gain"); e2->setAttribute ("v", 4);
+        auto* e3 = xml->createNewChildElement ("P"); e3->setAttribute ("id", "parametro_futuro"); e3->setAttribute ("v", 9);
+        presets::decode (q, *xml, vals, fresh);
+        q.applyPreset (vals, fresh, "Viejo");
+        check (mq.count() == 1 && std::abs (mq.band (0).sets[eq::St].gain - 4) < 1e-4 && plain (q, "out_m") == 0.0f,
+               "preset incompleto o con parámetros desconocidos: carga lo que entiende");
+
+        // De fábrica: "Plano" deja el EQ vacío
+        auto flat = presets::factoryXml (presets::factoryList()[0]);
+        presets::decode (q, *flat, vals, fresh);
+        q.applyPreset (vals, fresh, "Plano");
+        check (mq.count() == 0 && plain (q, "out_m") == 0.0f, "preset de fábrica «Plano»: sin bandas, salida a 0 dB");
+
+        // Fábrica con una banda: igual que crearla a mano
+        presets::Factory f { "Test", { { eq::Bell, eq::St, { { eq::St, 200, -3, 2 } } } } };
+        auto fx = presets::factoryXml (f);
+        presets::decode (q, *fx, vals, fresh);
+        q.applyPreset (vals, fresh, "Test");
+        ExcellecuProcessor r;
+        ui::BandModel mr (r);
+        mr.create (eq::Bell, 200, -3);
+        mr.set (ids::set (0, eq::St, "q"), 2.0f);
+        check (q.currentParams().sameBands (r.currentParams()) && q.lrFreshMask() == r.lrFreshMask(),
+               "un preset de fábrica da lo mismo que crear las bandas a mano");
+
+        // El nombre del preset se guarda con la sesión
+        MemoryBlock st;
+        q.getStateInformation (st);
+        ExcellecuProcessor s2;
+        s2.setStateInformation (st.getData(), (int) st.getSize());
+        check (s2.presetName() == "Test" && ! s2.presetModified(), "el nombre del preset se guarda con la sesión");
+
+        // TDM: cinco bandas (dos en M/S) y la curva en los puntos clave
+        const auto& fl = presets::factoryList();
+        check (fl.size() >= 2 && String (fl[1].name) == "TDM", "preset de fábrica TDM");
+        auto tdm = presets::factoryXml (fl[1]);
+        presets::decode (q, *tdm, vals, fresh);
+        q.applyPreset (vals, fresh, "TDM");
+        const auto tp = q.currentParams();
+        check (mq.count() == 5 && tp.bands[2].edit == eq::S && tp.bands[3].edit == eq::M, "TDM: 5 bandas, la 3 en Side y la 4 en Mid");
+        auto ot = run (q, 48000, sine (60));
+        check (std::abs (rmsDb (ot[0], 20000, 48000, sineRms) - 1.0) < 0.3, "TDM a 60 Hz ≈ +1 dB (" + String (rmsDb (ot[0], 20000, 48000, sineRms), 2) + ")");
+        tmp.deleteFile();
+    }
+
     {
         std::cout << "Interfaz" << std::endl;
         ExcellecuProcessor p;
@@ -280,6 +545,29 @@ int main (int argc, char** argv)
         p.selected = 3;
         MessageManager::getInstance()->runDispatchLoopUntil (200);
         snapshot (*ed, outDir.getChildFile ("04_filtro.png"));
+
+        // Salida en M/S con L/R también activa, y medidores con señal
+        setPlain (p, "out_l", -2.0f);
+        setPlain (p, "out_mode", 1.0f);
+        setPlain (p, "out_s", 1.5f);
+        p.applyPreset (std::vector<float> (), p.lrFreshMask(), "Mi master");   // solo el nombre
+        p.setPresetSaved ("Mi master");
+        setPlain (p, "out_m", -0.5f);
+        run (p, 24000, [] (int i, int c) { return (float) ((c == 0 ? 0.9 : 0.6) * std::sin (2 * eq::PI * 1000 * i / 48000.0)); });
+        MessageManager::getInstance()->runDispatchLoopUntil (60);
+        snapshot (*ed, outDir.getChildFile ("05_salida_medidores.png"));
+
+        // Preset de fábrica TDM (para comparar con la curva original)
+        {
+            std::vector<float> vals;
+            int fresh = 0;
+            auto tdm = presets::factoryXml (presets::factoryList()[1]);
+            presets::decode (p, *tdm, vals, fresh);
+            p.applyPreset (vals, fresh, "TDM");
+            p.selected = 3;
+            MessageManager::getInstance()->runDispatchLoopUntil (300);
+            snapshot (*ed, outDir.getChildFile ("06_tdm.png"));
+        }
         ed.reset();
 
         // Reabrir la ventana con una banda seleccionada (antes se colgaba: el botón "Activa"

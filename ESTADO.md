@@ -1,6 +1,6 @@
 # Estado del proyecto — Excellecu (EQ por DFT, bandas dinámicas)
 
-> Para retomar: "lee el ESTADO.md de excellecu". Actualizado: 24/11/2026.
+> Para retomar: "lee el ESTADO.md de excellecu". Actualizado: 26/11/2026.
 > Plan común de Javhastudios (venta, firma, web): ESTADO.md del proyecto de Claude
 > "Javhastudios Plugins". Antecesor: boboongecu (v0.4, borrado tras medirlo en Plugin Doctor).
 
@@ -10,6 +10,43 @@ Prototipo de EQ de fase cero con curvas gaussianas y dos motores: Exacto (convol
 zero-padding, por defecto) y Clásico (FFT → ganancia por bin → FFT inversa → suma solapada).
 Original: `web/eq-dft-proto.html` (v0.18, "50 motor exacto"). Objetivo: medirlo en Plugin
 Doctor y seguir iterando.
+
+## v0.21 (26/11/2026): funciones para la beta
+
+- **Ganancia de salida L/R–M/S** (sección "Salida" del panel). Parámetros `out_l`, `out_r`, `out_m`,
+  `out_s` (−24 a +12 dB), `out_mode` y `out_link`. Las cuatro actúan siempre, en serie (L/R y luego
+  M/S); el modo solo elige qué pareja se edita, así cambiar de modo no altera lo que suena. Si la
+  otra pareja no está a 0 dB se avisa debajo y su botón se marca. "Enlazar" mueve las dos lo mismo.
+  Suavizado de 50 ms. En mono actúan L y Mid. Doble clic en un deslizador = 0 dB.
+- **Medidores** (columna "Nivel"): entrada antes del EQ y salida después de la ganancia. Pico
+  (caída de 20 dB/s), RMS de ~330 ms, pico retenido 1,5 s, piloto de saturación (≥ 0 dBFS) y
+  máximo; clic para borrarlos. El audio acumula sin bloqueos y la interfaz recoge a 30 Hz.
+  Pendiente: true peak, LUFS y vista M/S.
+- **Deshacer / rehacer** (`Source/state/UndoHistory.h`): historial propio del procesador (sobrevive
+  a cerrar la ventana), 100 pasos. Solo apunta cambios hechos desde la interfaz (los que abren y
+  cierran gesto; la automatización no lo hace). Cada paso guarda antes/después solo de los
+  parámetros tocados, más lrFresh y la banda seleccionada. Todo lo de una misma acción (crear una
+  banda, cargar un preset) y todo un arrastre es un paso; toques seguidos del mismo control en
+  menos de 400 ms se juntan (rueda). Botones arriba y ⌘Z / ⌘⇧Z (Ctrl+Z / Ctrl+Mayús+Z / Ctrl+Y).
+  Cargar una sesión vacía el historial. Ojo: Ableton se queda ⌘Z si el foco no está en el plugin, y
+  también apunta los cambios de parámetros en su propio deshacer.
+- **Presets** (`Source/state/Presets.h`, barra superior): de fábrica "Plano" y "TDM"; propios como
+  archivos `.excellecu` (XML con `version`) en `~/Library/Audio/Presets/Javhastudios/Excellecu`
+  (Mac) o `Documentos/Javhastudios/Excellecu/Presets` (Windows). Anterior / siguiente, menú,
+  Guardar (pide nombre, avisa si existe), importar (copia a la carpeta), exportar, abrir carpeta.
+  Guardan bandas existentes + lrFresh + salida; lo que falte al cargar vuelve a su valor por
+  defecto y lo desconocido se ignora. Cargar es un paso de deshacer. El nombre se guarda con la
+  sesión y se marca "modificado" si el estado difiere del preset.
+- **TDM de fábrica**, sacada de las capturas de Plugin Doctor del 26/11: 1 Campana 1,55 kHz +1,0
+  Q 0,41 · 2 High shelf 20 kHz +1,7 Q 0,49 · 3 High shelf Side 388 Hz +0,5 Q 2,00 (Mid a 0 dB) ·
+  4 Campana Mid 60 Hz +1,0 Q 0,62 (Side a 0 dB) · 5 Campana 214 Hz −0,8 Q 4,28.
+- Ventana: tooltips activados (antes no había `TooltipWindow`).
+- Prueba de humo: ganancia L/R y M/S, cambio de modo, suavizado sin saltos, mono, medidores
+  (pico, RMS, saturación), deshacer (pasos, arrastre, automatización, rueda, lrFresh, selección,
+  límite, sesión), presets (ida y vuelta, defecto, incompletos, fábrica = a mano, TDM, sesión) y
+  capturas 05 (salida y medidores) y 06 (TDM).
+- Por comprobar en tu Mac: atajos de teclado en Ableton, diálogos de guardar/importar/exportar
+  en VST3 y AU, y que la TDM de fábrica coincide con la tuya en Plugin Doctor.
 
 ## v0.20 (24/11/2026): solo motor Exacto, filtro fijo de 8192
 
@@ -99,4 +136,7 @@ Doctor y seguir iterando.
 
 ## Pendiente / ideas
 
-- Lo que salga de las medidas en Plugin Doctor.
+- EQ: codo suave en HPF/LPF; high shelf cerca de Nyquist (−0,3 dB a 20 kHz frente a la TDM del
+  Pro-Q); filtro de 16 384 a 88,2/96 kHz; modo de fase mínima opcional.
+- Beta: true peak / LUFS y vista M/S en los medidores; ranuras A/B; inversor de polaridad.
+- Ideas en el documento del proyecto (flat tilt, Gain Scale, teclado, forma de campana…).

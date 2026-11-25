@@ -102,7 +102,106 @@ ControlsPanel::ControlsPanel (ExcellecuProcessor& p, ui::BandModel& m, std::func
     setupRow (slope, "Pendiente");
     for (Row* r : { &fc, &gain, &q, &slope })
         r->slider.onDragStart = [this] { if (proc.selected >= 0) model.markEdited (proc.selected); };
+    setupOut();
     refresh();
+}
+
+//── Salida ──
+int ControlsPanel::outIndex (int which) const
+{
+    const bool ms = proc.apvts.getRawParameterValue ("out_mode")->load() > 0.5f;
+    return (ms ? 2 : 0) + which;
+}
+
+RangedAudioParameter* ControlsPanel::outParam (int index) const
+{
+    const char* idsOut[] = { "out_l", "out_r", "out_m", "out_s" };
+    return proc.apvts.getParameter (idsOut[index]);
+}
+
+void ControlsPanel::setupOut()
+{
+    for (auto* b : { &outLr, &outMs }) addAndMakeVisible (b);
+    outLr.onClick = [this] { model.set ("out_mode", 0.0f); onChange(); };
+    outMs.onClick = [this] { model.set ("out_mode", 1.0f); onChange(); };
+    outLr.setTooltip (u8 ("Ganancia de salida de L y R"));
+    outMs.setTooltip (u8 ("Ganancia de salida de Mid y Side. Las dos parejas actúan siempre; el modo elige cuál se edita"));
+    outLink.getProperties().set ("accent", (int64) theme::accent.getARGB());
+    outLink.setTooltip (u8 ("Mover una ganancia mueve la otra lo mismo"));
+    addAndMakeVisible (outLink);
+    outLinkAtt = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "out_link", outLink);
+
+    int which = 0;
+    for (OutRow* r : { &outA, &outB })
+    {
+        r->which = which++;
+        auto& sl = r->slider;
+        sl.setSliderStyle (Slider::LinearHorizontal);
+        sl.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+        sl.setRange (-24.0, 12.0, 0.1);
+        sl.setDoubleClickReturnValue (true, 0.0);
+        sl.getProperties().set ("thumb", (int64) theme::accent.getARGB());
+        sl.onDragStart = [this] { outDragging = true; outGestures (true); };
+        sl.onDragEnd = [this] { outGestures (false); outDragging = false; onChange(); };
+        sl.onValueChange = [this, r] { outValueChanged (*r); };
+        addAndMakeVisible (sl);
+    }
+}
+
+// Abre o cierra el gesto de las dos ganancias de la pareja visible (un solo paso de deshacer)
+void ControlsPanel::outGestures (bool begin)
+{
+    for (int w = 0; w < 2; ++w)
+    {
+        auto* p = outParam (outIndex (w));
+        if (begin) { outStart[outIndex (w)] = p->convertFrom0to1 (p->getValue()); p->beginChangeGesture(); }
+        else p->endChangeGesture();
+    }
+}
+
+void ControlsPanel::outValueChanged (OutRow& r)
+{
+    const bool wasDragging = outDragging;
+    if (! wasDragging) outGestures (true);   // doble clic (vuelve a 0 dB) o teclado
+    const int me = outIndex (r.which), other = outIndex (1 - r.which);
+    const float v = (float) r.slider.getValue();
+    auto* pm = outParam (me);
+    pm->setValueNotifyingHost (pm->convertTo0to1 (v));
+    if (proc.apvts.getRawParameterValue ("out_link")->load() > 0.5f)
+    {
+        auto* po = outParam (other);
+        const float ov = jlimit (-24.0f, 12.0f, std::round ((outStart[other] + v - outStart[me]) * 10.0f) / 10.0f);
+        po->setValueNotifyingHost (po->convertTo0to1 (ov));
+    }
+    if (! wasDragging) { outGestures (false); onChange(); }
+    syncOut();
+    repaint();
+}
+
+void ControlsPanel::syncOut()
+{
+    auto db = [this] (int i) { return proc.apvts.getRawParameterValue (i == 0 ? "out_l" : i == 1 ? "out_r" : i == 2 ? "out_m" : "out_s")->load(); };
+    const bool ms = outIndex (0) == 2;
+    outLr.setActive (! ms);
+    outMs.setActive (ms);
+    outA.name = ms ? "Mid" : "L";
+    outB.name = ms ? "Side" : "R";
+    for (OutRow* r : { &outA, &outB })
+    {
+        const float v = db (outIndex (r->which));
+        r->valueText = fmt::gain (v);
+        if (! outDragging) r->slider.setValue (v, dontSendNotification);
+    }
+    // La otra pareja también suena: se avisa si no está a 0 dB
+    const int o = ms ? 0 : 2;
+    const float a = db (o), b = db (o + 1);
+    String note;
+    if (a != 0.0f || b != 0.0f)
+        note = (ms ? u8 ("También activa en L/R: L ") : u8 ("También activa en M/S: Mid "))
+               + fmt::gain (a) + (ms ? u8 (" · R ") : u8 (" · Side ")) + fmt::gain (b);
+    outLr.setLive (ms && (a != 0.0f || b != 0.0f));
+    outMs.setLive (! ms && (a != 0.0f || b != 0.0f));
+    if (note != outNoteText) { outNoteText = note; resized(); }
 }
 
 void ControlsPanel::setupRow (Row& r, const String& name)
@@ -168,6 +267,7 @@ void ControlsPanel::refresh()
         slope.valueText = String (p.slope) + " dB/oct";
         for (Row* r : { &fc, &gain, &q, &slope }) r->slider.setAlpha (p.on ? 1.0f : 0.35f);
     }
+    syncOut();
     const String note = u8 ("Filtro de fase cero de ") + String (prm.n + 1) + u8 (" muestras (diseñado con FFT de ")
                         + String (2 * prm.n) + u8 ("), aplicado por convolución en particiones de ") + String (eq::PART)
                         + u8 (" muestras. Latencia: ") + String (eq::latencyFor (prm.n)) + u8 (" muestras.");
@@ -257,6 +357,24 @@ void ControlsPanel::resized()
 
     dividers[0] = { 0, y, w, 1 };
     y += 13;
+    outTitle = { 0, y, w, 16 };
+    y += 26;
+    outModeLabel = { 0, y, 40, 15 };
+    outLr.setBounds (42, y, 34, 15);
+    outMs.setBounds (79, y, 34, 15);
+    outLink.setBounds (w - 70, y, 70, 16);
+    y += 25;
+    for (OutRow* r : { &outA, &outB })
+    {
+        r->label = { 0, y, w, 14 };
+        r->slider.setBounds (-6, y + 16, w + 12, 14);
+        y += 16 + 14 + 10;
+    }
+    outNote = {};
+    if (outNoteText.isNotEmpty()) { outNote = { 0, y, w, 26 }; y += 28; }
+    y += 2;
+    dividers[1] = { 0, y, w, 1 };
+    y += 13;
     motorTitle = { 0, y, w, 16 };
     y += 26;
     engineNote = { 0, y, w, 48 };
@@ -314,7 +432,27 @@ void ControlsPanel::paint (Graphics& g)
     }
 
     g.setColour (theme::border);
-    g.fillRect ((float) dividers[0].getX(), (float) dividers[0].getY(), (float) dividers[0].getWidth(), 0.6f);
+    for (auto& d : dividers) g.fillRect ((float) d.getX(), (float) d.getY(), (float) d.getWidth(), 0.6f);
+
+    panelTitle (g, outTitle, "SALIDA");
+    g.setColour (theme::muted);
+    g.setFont (theme::font (9.0f));
+    g.drawText ("EDITAR", outModeLabel, Justification::centredLeft, false);
+    for (const OutRow* row : { &outA, &outB })
+    {
+        g.setFont (theme::font (10.0f));
+        g.setColour (theme::muted);
+        g.drawText (row->name, row->label, Justification::centredLeft, true);
+        g.setColour (row->slider.getValue() != 0.0 ? theme::accent : theme::muted);
+        g.drawText (row->valueText, row->label, Justification::centredRight, true);
+    }
+    if (! outNote.isEmpty())
+    {
+        g.setColour (theme::warn.withAlpha (0.85f));
+        g.setFont (theme::font (9.0f));
+        g.drawFittedText (outNoteText, outNote, Justification::topLeft, 2, 1.0f);
+    }
+
     panelTitle (g, motorTitle, "MOTOR");
     g.setColour (theme::muted.withAlpha (0.8f));
     g.setFont (theme::font (9.0f));
@@ -326,7 +464,9 @@ ExcellecuEditor::ExcellecuEditor (ExcellecuProcessor& p)
     : AudioProcessorEditor (&p), proc (p), model (p),
       controls (p, model, [this] { refreshNow(); }),
       mag (model, [this] { refreshNow(); }),
-      phase (model)
+      phase (model),
+      presetBar (p, [this] { refreshNow(); }),
+      meters (p)
 {
     setLookAndFeel (&lnf);
     viewport.setViewedComponent (&controls, false);
@@ -337,6 +477,8 @@ ExcellecuEditor::ExcellecuEditor (ExcellecuProcessor& p)
     addAndMakeVisible (phase);
     mag.setData (&chart);
     phase.setData (&chart);
+    addAndMakeVisible (presetBar);
+    addAndMakeVisible (meters);
 
     for (int t = 0; t < eq::NUM_TYPES; ++t)
     {
@@ -365,6 +507,7 @@ void ExcellecuEditor::refreshNow()
     if (proc.selected >= 0 && ! model.used (proc.selected)) proc.selected = -1;
     for (int t = 0; t < eq::NUM_TYPES; ++t) newTypeButtons[t]->setActive (t == proc.newBandType);
     controls.refresh();
+    presetBar.refresh();
 
     const auto prm = proc.currentParams();
     const double sr = proc.sampleRateForUi();
@@ -394,6 +537,16 @@ void ExcellecuEditor::timerCallback() { refreshNow(); }
 
 bool ExcellecuEditor::keyPressed (const KeyPress& k)
 {
+    const auto mods = k.getModifiers();
+    const int code = k.getKeyCode();
+    if (mods.isCommandDown() && (code == 'Z' || code == 'z'))
+    {
+        if (mods.isShiftDown()) presetBar.redo(); else presetBar.undo();
+        return true;
+    }
+#if ! JUCE_MAC
+    if (mods.isCommandDown() && (code == 'Y' || code == 'y')) { presetBar.redo(); return true; }
+#endif
     if ((k == KeyPress::deleteKey || k == KeyPress::backspaceKey) && proc.selected >= 0)
     {
         model.remove (proc.selected);
@@ -443,7 +596,7 @@ void ExcellecuEditor::paint (Graphics& g)
     g.drawText (status, header.withTrimmedRight (16), Justification::centredRight, false);
 
     // Marcos de las gráficas
-    for (auto pr : { magPanel, phasePanel })
+    for (auto pr : { magPanel, phasePanel, meterPanel })
     {
         g.setColour (Colours::white.withAlpha (0.02f));
         g.fillRoundedRectangle (pr.toFloat().reduced (0.5f), 4.0f);
@@ -455,6 +608,8 @@ void ExcellecuEditor::paint (Graphics& g)
     g.setColour (theme::muted);
     g.setFont (theme::font (9.0f));
     g.drawText ("NUEVO PUNTO", Rectangle<int> (newTypeButtons[0]->getX() - 80, magTitle.getY(), 76, 16), Justification::centredRight, false);
+
+    panelTitle (g, meterPanel.reduced (10).withHeight (16), "NIVEL");
 
     auto phTitle = phasePanel.reduced (10).withHeight (16);
     panelTitle (g, phTitle, "FASE");
@@ -485,6 +640,10 @@ void ExcellecuEditor::resized()
     auto left = body.removeFromLeft (panelW + 8);
     body.removeFromLeft (8);
     viewport.setBounds (left);
+    presetBar.setBounds (getWidth() - 24 - PresetBar::idealWidth, 14, PresetBar::idealWidth, 28);
+    meterPanel = body.removeFromRight (104);
+    body.removeFromRight (12);
+    meters.setBounds (meterPanel.reduced (8).withTrimmedTop (28));
     controls.setSize (panelW, controls.idealHeight());
     controls.resized();
 
