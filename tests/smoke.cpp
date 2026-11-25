@@ -504,6 +504,7 @@ int main (int argc, char** argv)
         const auto& fl = presets::factoryList();
         check (fl.size() >= 2 && String (fl[1].name) == "TDM", "preset de fábrica TDM");
         auto tdm = presets::factoryXml (fl[1]);
+        tdm->writeTo (outDir.getChildFile ("TDM.excellecu"));   // para comprobar que la web lo abre igual
         presets::decode (q, *tdm, vals, fresh);
         q.applyPreset (vals, fresh, "TDM");
         const auto tp = q.currentParams();

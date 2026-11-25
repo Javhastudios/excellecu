@@ -8,8 +8,9 @@
 
 Prototipo de EQ de fase cero con curvas gaussianas y dos motores: Exacto (convolución con
 zero-padding, por defecto) y Clásico (FFT → ganancia por bin → FFT inversa → suma solapada).
-Original: `web/eq-dft-proto.html` (v0.18, "50 motor exacto"). Objetivo: medirlo en Plugin
-Doctor y seguir iterando.
+Original: `web/eq-dft-proto.html` (ahora v0.21). Objetivo: medirlo en Plugin Doctor y seguir
+iterando. **Acuerdo (26/11/2026): cada avance del plugin se hace también en el HTML**, que Javier
+guarda como archivo; el HTML conserva además los motores Clásico, la ventana y el overlap.
 
 ## v0.21 (26/11/2026): funciones para la beta
 
@@ -41,6 +42,17 @@ Doctor y seguir iterando.
   Q 0,41 · 2 High shelf 20 kHz +1,7 Q 0,49 · 3 High shelf Side 388 Hz +0,5 Q 2,00 (Mid a 0 dB) ·
   4 Campana Mid 60 Hz +1,0 Q 0,62 (Side a 0 dB) · 5 Campana 214 Hz −0,8 Q 4,28.
 - Ventana: tooltips activados (antes no había `TooltipWindow`).
+- **Prototipo web v0.21** con lo mismo: barra de deshacer/presets, sección Salida y columna Nivel.
+  `processAudio` no cambia (las pruebas contra C++ siguen idénticas bit a bit): la ganancia de
+  salida se aplica al reproducir el procesado (GainNodes en matriz 2×2, se mueve en directo) y al
+  exportar el WAV. Medidores durante la reproducción (entrada = original, salida = lo que suena).
+  Deshacer por instantáneas al terminar cada gesto (soltar, clic, tecla; rueda tras 0,4 s).
+  Presets en el **mismo formato `.excellecu` que el plugin** (se intercambian en los dos sentidos);
+  los propios se guardan en el navegador (localStorage) y se exportan/importan como archivo.
+  Importar un archivo que se llama como uno de fábrica le añade " (importado)" (también en el plugin).
+- Prueba nueva `tests/web_ui.mjs` (Chrome con Playwright, en GitHub Actions tras la prueba de humo):
+  arrastre real = un paso, Ctrl+Z/Y, salida enlazada y M/S, TDM, la TDM escrita por el plugin abre
+  igual en la web, guardar/importar, medidores reproduciendo. Captura `web_v021.png`.
 - Prueba de humo: ganancia L/R y M/S, cambio de modo, suavizado sin saltos, mono, medidores
   (pico, RMS, saturación), deshacer (pasos, arrastre, automatización, rueda, lrFresh, selección,
   límite, sesión), presets (ida y vuelta, defecto, incompletos, fábrica = a mano, TDM, sesión) y

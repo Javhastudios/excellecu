@@ -194,6 +194,10 @@ void PresetBar::importFile()
         const File dir = presets::userFolder();
         dir.createDirectory();
         File dst = dir.getChildFile (src.getFileName());
+        // Si se llama como uno de fábrica (p. ej. TDM.excellecu), se renombra para no taparlo
+        for (const auto& f : presets::factoryList())
+            if (String::fromUTF8 (f.name) == src.getFileNameWithoutExtension())
+                dst = dir.getChildFile (src.getFileNameWithoutExtension() + " (importado)" + presets::EXTENSION);
         if (! src.isAChildOf (dir))
         {
             if (dst.existsAsFile()) dst = dst.getNonexistentSibling (false);

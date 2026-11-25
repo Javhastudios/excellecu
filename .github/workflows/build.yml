@@ -70,6 +70,12 @@ jobs:
           cmake --build build --config Release --target ex_smoke --parallel 4
           xvfb-run -a ./build/ex_smoke_artefacts/Release/ex_smoke smoke-out
 
+      - name: Prueba del prototipo web en Chrome (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          npm install --no-save --no-package-lock playwright@1.49.1
+          node tests/web_ui.mjs web/eq-dft-proto.html smoke-out/TDM.excellecu smoke-out
+
       - name: Validar el VST3 con pluginval (Linux)
         if: runner.os == 'Linux'
         run: |

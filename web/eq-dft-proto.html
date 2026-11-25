@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EQ Motor DFT — Prototipo v0.18</title>
+<title>EQ Motor DFT — Prototipo v0.21</title>
 <style>
   :root {
     --bg: #0e0e10;
@@ -103,7 +103,20 @@
   .info-card .v { font-size: 13px; color: var(--accent2); margin-top: 2px; }
 
   /* Módulo 2 */
-  .eq-layout { display: grid; grid-template-columns: 220px 1fr; gap: 16px; }
+  .eq-layout { display: grid; grid-template-columns: 220px 1fr 92px; gap: 16px; }
+  /* v0.21: barra de presets y deshacer, salida, medidores */
+  .top-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 14px; flex-wrap: wrap; }
+  .top-bar .sep { width: 14px; }
+  .top-bar .ms-btn:disabled { opacity: 0.35; cursor: default; border-color: var(--border); color: var(--muted); }
+  .preset-sel {
+    font-family: var(--font); font-size: 10px; color: var(--text); background: rgba(255,255,255,0.03);
+    border: 0.5px solid var(--border); border-radius: 3px; padding: 2px 4px; min-width: 170px;
+  }
+  .preset-mod { font-size: 9px; color: var(--warn); margin: 0 6px; min-width: 70px; }
+  .out-note { font-size: 9px; color: var(--warn); line-height: 1.5; margin: -4px 0 10px; opacity: 0.9; }
+  .out-link { margin-left: auto; font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .meters-box { background: rgba(255,255,255,0.02); border: 0.5px solid var(--border); border-radius: 4px; padding: 10px 6px; display: flex; flex-direction: column; align-self: start; height: 470px; }
+  .meters-box canvas { width: 100%; flex: 1; min-height: 260px; cursor: pointer; }
   .eq-controls { display: flex; flex-direction: column; gap: 0; }
   .panel-title {
     font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase;
@@ -240,7 +253,7 @@
 </head>
 <body>
 
-<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.18</h1>
+<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.21</h1>
 
 <div class="modules">
 
@@ -277,6 +290,20 @@
       <span class="module-status" id="m2-status">sin audio cargado</span>
     </div>
     <div class="module-body">
+      <div class="top-bar">
+        <button class="ms-btn" id="btn-undo" title="Deshacer (Ctrl/⌘ + Z)">Deshacer</button>
+        <button class="ms-btn" id="btn-redo" title="Rehacer (Ctrl/⌘ + Mayús + Z · Ctrl + Y)">Rehacer</button>
+        <span class="sep"></span>
+        <button class="ms-btn" id="preset-prev" title="Preset anterior">&lt;</button>
+        <select class="preset-sel" id="preset-sel" title="Presets (mismo formato .excellecu que el plugin)"></select>
+        <button class="ms-btn" id="preset-next" title="Preset siguiente">&gt;</button>
+        <span class="preset-mod" id="preset-mod"></span>
+        <button class="ms-btn" id="preset-save" title="Guardar como preset propio (en este navegador)">Guardar</button>
+        <button class="ms-btn" id="preset-del" title="Borrar el preset propio seleccionado">Borrar</button>
+        <button class="ms-btn" id="preset-import" title="Cargar un archivo .excellecu (también los del plugin)">Importar</button>
+        <button class="ms-btn" id="preset-export" title="Descargar como archivo .excellecu (lo abre el plugin)">Exportar</button>
+        <input type="file" id="preset-file" accept=".excellecu,.xml" style="display:none">
+      </div>
       <div class="eq-layout">
         <div class="eq-controls">
           <div class="panel-title">Señal de prueba</div>
@@ -329,6 +356,24 @@
           </div>
 
           <hr class="divider">
+          <div class="panel-title">Salida</div>
+          <div class="ms-row"><span class="ms-lbl">Editar</span>
+            <button class="ms-btn" id="out-lr" title="Ganancia de salida de L y R">L/R</button>
+            <button class="ms-btn" id="out-ms" title="Ganancia de salida de Mid y Side. Las dos parejas actúan siempre; el modo elige cuál se edita">M/S</button>
+            <label class="out-link" title="Mover una ganancia mueve la otra lo mismo"><input type="checkbox" id="out-link" checked> Enlazar</label>
+          </div>
+          <div class="control">
+            <label><span id="out-a-name">L</span> <span id="lbl-out-a">0.0 dB</span></label>
+            <input type="range" id="sl-out-a" min="-24" max="12" step="0.1" value="0" title="Doble clic: 0 dB">
+          </div>
+          <div class="control">
+            <label><span id="out-b-name">R</span> <span id="lbl-out-b">0.0 dB</span></label>
+            <input type="range" id="sl-out-b" min="-24" max="12" step="0.1" value="0" title="Doble clic: 0 dB">
+          </div>
+          <div class="out-note" id="out-note" style="display:none"></div>
+          <div style="font-size:9px;color:var(--muted);line-height:1.6;margin:-2px 0 4px;opacity:0.7">Se aplica en directo al reproducir el procesado y al exportar; no hace falta volver a procesar.</div>
+
+          <hr class="divider">
           <div class="panel-title">Motor DFT</div>
           <div class="ms-row"><span class="ms-lbl">Modo</span>
             <button class="ms-btn" id="eng-exact" title="Convolución exacta con zero-padding: sin aliasing temporal ni huella de bloque">Exacto</button>
@@ -363,6 +408,11 @@
             </div>
             <canvas id="cPhase" height="130"></canvas>
           </div>
+        </div>
+
+        <div class="meters-box">
+          <div class="panel-title">Nivel</div>
+          <canvas id="cMeter" title="Pico (claro) y RMS (oscuro) durante la reproducción. Clic: borra saturación y máximos"></canvas>
         </div>
       </div>
     </div>
@@ -1043,6 +1093,7 @@ function getAudioCtx() {
 
 function stopPlaying() {
   if (playingNode) { try { playingNode.stop(); } catch(e){} playingNode = null; }
+  playStart = null;
   document.getElementById('btn-orig').classList.remove('active');
   document.getElementById('btn-proc').classList.remove('active');
   document.getElementById('btn-orig').textContent = '▶ Original';
@@ -1051,18 +1102,22 @@ function stopPlaying() {
 }
 
 // channels: array de Float32Array (1 = mono, 2 = estéreo)
-function playBuffer(channels, sr, btnId, label) {
+// withOut: pasa por la ganancia de salida (solo el procesado); se puede mover en directo
+function playBuffer(channels, sr, btnId, label, withOut) {
   if (playingWhich === label) { stopPlaying(); return; }
   stopPlaying();
   const ctx = getAudioCtx();
   const buf = ctx.createBuffer(channels.length, channels[0].length, sr);
   channels.forEach((data, ch) => buf.getChannelData(ch).set(data));
   const src = ctx.createBufferSource();
-  src.buffer = buf; src.connect(ctx.destination); src.start();
+  src.buffer = buf;
+  if (withOut) src.connect(buildOutGraph(ctx, channels.length)); else { outNodes = null; src.connect(ctx.destination); }
+  src.start();
+  playStart = { t0: ctx.currentTime, channels, withOut, sr };
   src.onended = () => {
     document.getElementById(btnId).classList.remove('active');
     document.getElementById(btnId).textContent = '▶ ' + label;
-    playingWhich = null;
+    playingWhich = null; playStart = null;
   };
   playingNode = src; playingWhich = label;
   document.getElementById(btnId).classList.add('active');
@@ -1073,17 +1128,18 @@ function playOriginal() {
   if (!rawBuffer) return;
   const chs = [];
   for (let ch = 0; ch < rawBuffer.numberOfChannels; ch++) chs.push(rawBuffer.getChannelData(ch));
-  playBuffer(chs, rawBuffer.sampleRate, 'btn-orig', 'Original');
+  playBuffer(chs, rawBuffer.sampleRate, 'btn-orig', 'Original', false);
 }
 
 function playProcessed() {
   if (!processedPCM || !rawBuffer) return;
-  playBuffer(processedPCM, rawBuffer.sampleRate, 'btn-proc', 'Procesado');
+  playBuffer(processedPCM, rawBuffer.sampleRate, 'btn-proc', 'Procesado', true);
 }
 
 // ── Módulo 3: Exportar WAV ────────────────────────────────────────────
 function exportWAV() {
   if (!processedPCM) return;
+  const outPCM = applyOutGain(processedPCM);
   const sr    = rawBuffer.sampleRate;
   const numCh = processedPCM.length;
   const bps   = 4; // 32-bit float
@@ -1111,7 +1167,7 @@ function exportWAV() {
   let offset = 44;
   for (let i = 0; i < numSamples; i++) {
     for (let ch = 0; ch < numCh; ch++) {
-      view.setFloat32(offset, processedPCM[ch][i], true);
+      view.setFloat32(offset, outPCM[ch][i], true);
       offset += 4;
     }
   }
@@ -1952,6 +2008,496 @@ function initPanel() {
   });
 }
 
+
+// ══ v0.21: ganancia de salida, medidores, deshacer y presets (igual que el plugin) ══════
+
+// ── Ganancia de salida ───────────────────────────────────────────────
+// L/R y luego M/S, en serie. Las cuatro actúan siempre; el modo solo elige qué pareja se edita.
+const OUT_MIN = -24, OUT_MAX = 12;
+const outGain = { mode: 'lr', link: true, l: 0, r: 0, m: 0, s: 0 };
+let outNodes = null;     // GainNodes de la reproducción en curso (para moverlos en directo)
+let playStart = null;    // { t0, channels, withOut, sr } de la reproducción en curso
+const dbLin = d => Math.pow(10, d / 20);
+const clampOut = v => Math.min(OUT_MAX, Math.max(OUT_MIN, Math.round(v * 10) / 10));
+
+// Matriz 2×2 equivalente: outL = inL·ll + inR·rl ; outR = inL·lr + inR·rr. Mono: in·mono
+function outMatrix() {
+  const gl = dbLin(outGain.l), gr = dbLin(outGain.r), gm = dbLin(outGain.m), gs = dbLin(outGain.s);
+  const a = (gm + gs) / 2, b = (gm - gs) / 2;
+  return { ll: gl * a, rl: gr * b, lr: gl * b, rr: gr * a, mono: gl * gm };
+}
+const outIsUnity = () => outGain.l === 0 && outGain.r === 0 && outGain.m === 0 && outGain.s === 0;
+
+function applyOutGain(chs) {
+  if (outIsUnity()) return chs;
+  const M = outMatrix(), n = chs[0].length;
+  if (chs.length === 1) { const o = new Float32Array(n); for (let i = 0; i < n; i++) o[i] = chs[0][i] * M.mono; return [o]; }
+  const L = new Float32Array(n), R = new Float32Array(n), a = chs[0], b = chs[1];
+  for (let i = 0; i < n; i++) { L[i] = a[i] * M.ll + b[i] * M.rl; R[i] = a[i] * M.lr + b[i] * M.rr; }
+  return [L, R];
+}
+
+function buildOutGraph(ctx, numCh) {
+  const M = outMatrix();
+  if (numCh === 1) {
+    const g = ctx.createGain(); g.gain.value = M.mono; g.connect(ctx.destination);
+    outNodes = { mono: g };
+    return g;
+  }
+  const split = ctx.createChannelSplitter(2), merge = ctx.createChannelMerger(2);
+  const mk = (from, to, v) => { const g = ctx.createGain(); g.gain.value = v; split.connect(g, from); g.connect(merge, 0, to); return g; };
+  outNodes = { ll: mk(0, 0, M.ll), rl: mk(1, 0, M.rl), lr: mk(0, 1, M.lr), rr: mk(1, 1, M.rr) };
+  merge.connect(ctx.destination);
+  return split;
+}
+
+function updateOutLive() {
+  if (!outNodes || !audioCtx) return;
+  const M = outMatrix(), t = audioCtx.currentTime;
+  for (const k of Object.keys(outNodes)) outNodes[k].gain.setTargetAtTime(M[k], t, 0.015);   // suavizado
+}
+
+const outKeys = () => outGain.mode === 'ms' ? ['m', 's'] : ['l', 'r'];
+
+function syncOut() {
+  const ms = outGain.mode === 'ms', [ka, kb] = outKeys();
+  $id('out-lr').classList.toggle('ms-active', !ms);
+  $id('out-ms').classList.toggle('ms-active', ms);
+  $id('out-link').checked = outGain.link;
+  $id('out-a-name').textContent = ms ? 'Mid' : 'L';
+  $id('out-b-name').textContent = ms ? 'Side' : 'R';
+  $id('sl-out-a').value = outGain[ka]; $id('lbl-out-a').textContent = fmtGain(outGain[ka]);
+  $id('sl-out-b').value = outGain[kb]; $id('lbl-out-b').textContent = fmtGain(outGain[kb]);
+  const [oa, ob] = ms ? ['l', 'r'] : ['m', 's'];
+  const other = outGain[oa] !== 0 || outGain[ob] !== 0;
+  $id('out-lr').classList.toggle('ms-live', ms && other);
+  $id('out-ms').classList.toggle('ms-live', !ms && other);
+  const note = $id('out-note');
+  note.style.display = other ? 'block' : 'none';
+  if (other) note.textContent = ms ? `También activa en L/R: L ${fmtGain(outGain.l)} · R ${fmtGain(outGain.r)}`
+                                   : `También activa en M/S: Mid ${fmtGain(outGain.m)} · Side ${fmtGain(outGain.s)}`;
+}
+
+function initOut() {
+  $id('out-lr').addEventListener('click', () => { outGain.mode = 'lr'; syncOut(); });
+  $id('out-ms').addEventListener('click', () => { outGain.mode = 'ms'; syncOut(); });
+  $id('out-link').addEventListener('change', function () { outGain.link = this.checked; });
+  [['sl-out-a', 0], ['sl-out-b', 1]].forEach(([id, which]) => {
+    const sl = $id(id);
+    let start = null;
+    const remember = () => { start = { ...outGain }; };
+    sl.addEventListener('pointerdown', remember);
+    sl.addEventListener('keydown', remember);
+    sl.addEventListener('input', function () {
+      if (!start) remember();
+      const keys = outKeys(), me = keys[which], other = keys[1 - which];
+      const v = clampOut(parseFloat(this.value));
+      outGain[me] = v;
+      if (outGain.link) outGain[other] = clampOut(start[other] + v - start[me]);
+      syncOut(); updateOutLive();
+    });
+    sl.addEventListener('change', () => { start = null; });
+    sl.addEventListener('dblclick', () => {
+      remember();
+      sl.value = 0;
+      sl.dispatchEvent(new Event('input'));
+      start = null;
+      commitHistory();
+    });
+  });
+  syncOut();
+}
+
+// ── Medidores ────────────────────────────────────────────────────────
+// Durante la reproducción: entrada = archivo original, salida = lo que suena (procesado con la
+// ganancia de salida, o el original si se reproduce el original). Pico con caída de 20 dB/s,
+// RMS de ~300 ms, pico retenido 1,5 s, saturación (≥ 0 dBFS) que queda encendida hasta clic.
+const METER_MIN = -60, METER_MAX = 6;
+const newMeterCh = () => ({ peak: -100, rms: -100, hold: -100, holdT: 0, max: -100, clip: false });
+const meters = { in: [newMeterCh(), newMeterCh()], out: [newMeterCh(), newMeterCh()], ch: 2, last: 0 };
+const linDb = g => g > 1e-6 ? 20 * Math.log10(g) : -120;
+
+function meterWindow(chs, idx, sr, M) {
+  // Pico de los últimos ~50 ms y RMS de ~300 ms terminando en idx
+  const n = chs[0].length, pk = [0, 0], ss = [0, 0];
+  const i0 = Math.max(0, idx - Math.round(0.3 * sr)), ip = Math.max(0, idx - Math.round(0.05 * sr)), i1 = Math.min(n, idx);
+  for (let i = i0; i < i1; i++) {
+    let a = chs[0][i], b = chs.length > 1 ? chs[1][i] : a;
+    if (M) { if (chs.length > 1) { const x = a * M.ll + b * M.rl, y = a * M.lr + b * M.rr; a = x; b = y; } else { a *= M.mono; b = a; } }
+    ss[0] += a * a; ss[1] += b * b;
+    if (i >= ip) { pk[0] = Math.max(pk[0], Math.abs(a)); pk[1] = Math.max(pk[1], Math.abs(b)); }
+  }
+  const cnt = Math.max(1, i1 - i0);
+  return { pk, rms: [Math.sqrt(ss[0] / cnt), Math.sqrt(ss[1] / cnt)] };
+}
+
+function meterTick(now) {
+  const dt = meters.last ? Math.min(0.2, (now - meters.last) / 1000) : 0;
+  meters.last = now;
+  let win = null;
+  if (playStart && audioCtx && rawBuffer) {
+    const idx = Math.round((audioCtx.currentTime - playStart.t0) * playStart.sr);
+    const raw = [];
+    for (let c = 0; c < rawBuffer.numberOfChannels; c++) raw.push(rawBuffer.getChannelData(c));
+    meters.ch = Math.min(2, raw.length);
+    win = { in: meterWindow(raw, idx, playStart.sr, null),
+            out: meterWindow(playStart.channels, idx, playStart.sr, playStart.withOut ? outMatrix() : null) };
+  }
+  for (const g of ['in', 'out']) for (let c = 0; c < 2; c++) {
+    const m = meters[g][c];
+    const pk = win ? win[g].pk[c] : 0;
+    const db = linDb(pk);
+    m.peak = Math.max(db, m.peak - 20 * dt);
+    m.rms = win ? linDb(win[g].rms[c]) : Math.max(-120, m.rms - 20 * dt);
+    if (db >= m.hold || now - m.holdT > 1500) { m.hold = db; m.holdT = now; }
+    m.max = Math.max(m.max, db);
+    if (pk >= 1) m.clip = true;
+  }
+  drawMeters();
+  requestAnimationFrame(meterTick);
+}
+
+function drawMeters() {
+  const cv = $id('cMeter');
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  if (!r.width || !r.height) return;
+  if (cv.width !== Math.round(r.width * dpr) || cv.height !== Math.round(r.height * dpr)) {
+    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = r.width, H = r.height;
+  ctx.clearRect(0, 0, W, H);
+  const titleH = 14, ledH = 6, numH = 26, scaleW = 20, groupW = (W - scaleW) / 2;
+  const top = titleH + 4 + ledH + 3, bottom = H - numH;
+  const yFor = db => bottom - Math.min(1, Math.max(0, (db - METER_MIN) / (METER_MAX - METER_MIN))) * (bottom - top);
+  const css = getComputedStyle(document.documentElement);
+  const col = n => css.getPropertyValue(n).trim();
+  ctx.font = '8px ' + col('--font');
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const db of [6, 0, -6, -12, -18, -24, -36, -48, -60]) {
+    ctx.fillStyle = db === 0 ? col('--warn') : col('--muted');
+    ctx.fillText((db > 0 ? '+' : '') + Math.abs(db), groupW + scaleW / 2, yFor(db));
+  }
+  const red = '#ff4d4d';
+  ['in', 'out'].forEach((g, gi) => {
+    const gx = gi === 0 ? 0 : groupW + scaleW;
+    ctx.font = '9px ' + col('--font'); ctx.fillStyle = col('--muted');
+    ctx.fillText(gi === 0 ? 'ENT' : 'SAL', gx + groupW / 2, titleH / 2);
+    const nc = meters.ch, gap = 3, bw = (groupW - 6 - gap * (nc - 1)) / nc;
+    let max = -120, clip = false;
+    const base = gi === 0 ? col('--accent2') : col('--accent');
+    for (let c = 0; c < nc; c++) {
+      const m = meters[g][c], x = gx + 3 + c * (bw + gap);
+      max = Math.max(max, m.max); clip = clip || m.clip;
+      ctx.fillStyle = m.clip ? red : col('--border'); ctx.fillRect(x, titleH + 4, bw, ledH);
+      ctx.fillStyle = 'rgba(255,255,255,0.03)'; ctx.fillRect(x, top, bw, bottom - top);
+      ctx.fillStyle = 'rgba(247,162,62,0.35)'; ctx.fillRect(x, yFor(0), bw, 0.6);
+      const fill = (db, alpha) => {
+        if (db <= METER_MIN) return;
+        const y = yFor(db);
+        ctx.globalAlpha = alpha; ctx.fillStyle = db > 0 ? red : base;
+        ctx.fillRect(x, y, bw, bottom - y); ctx.globalAlpha = 1;
+      };
+      fill(m.peak, 0.45); fill(m.rms, 0.85);
+      if (m.hold > METER_MIN) { ctx.fillStyle = m.hold > 0 ? red : 'rgba(232,232,240,0.8)'; ctx.fillRect(x, yFor(m.hold) - 0.5, bw, 1.2); }
+      if (nc === 2) { ctx.font = '8px ' + col('--font'); ctx.fillStyle = col('--muted'); ctx.fillText(c ? 'R' : 'L', x + bw / 2, bottom + 6); }
+    }
+    ctx.font = '9px ' + col('--font'); ctx.fillStyle = clip ? red : col('--text');
+    ctx.fillText(max <= -99 ? '−∞' : (max > 0 ? '+' : '') + max.toFixed(1), gx + groupW / 2, bottom + 18);
+  });
+}
+
+function initMeters() {
+  $id('cMeter').addEventListener('click', () => {
+    for (const g of ['in', 'out']) for (const m of meters[g]) { m.clip = false; m.max = -100; m.hold = -100; }
+  });
+  requestAnimationFrame(meterTick);
+}
+
+// ── Deshacer / rehacer ───────────────────────────────────────────────
+// El estado (bandas + salida) se compara al terminar cada gesto de la interfaz (soltar el
+// ratón, soltar un deslizador, clic, tecla); si cambió, el anterior pasa al historial. Así un
+// arrastre entero es un solo paso. La rueda se agrupa: un paso cuando para ~0,4 s.
+const UNDO_MAX = 100;
+const undoStack = [], redoStack = [];
+const snapState = () => JSON.stringify({ bands, nextBandId, out: outGain });
+let lastSnap = null, lastSel = null, wheelTimer = 0;
+
+function commitHistory() {
+  const now = snapState();
+  if (lastSnap !== null && now !== lastSnap) {
+    undoStack.push({ snap: lastSnap, sel: lastSel });
+    if (undoStack.length > UNDO_MAX) undoStack.shift();
+    redoStack.length = 0;
+  }
+  lastSnap = now; lastSel = selectedId;
+  syncHistoryButtons();
+}
+
+function restoreState(entry) {
+  const st = JSON.parse(entry.snap);
+  bands = st.bands; nextBandId = st.nextBandId;
+  Object.assign(outGain, st.out);
+  selectedId = bandById(entry.sel) ? entry.sel : null;
+  lastSnap = entry.snap; lastSel = selectedId;
+  syncPanel(); syncOut(); updateCharts(); updateOutLive(); refreshPresetUI();
+}
+
+function undo() {
+  commitHistory();
+  if (!undoStack.length) return;
+  redoStack.push({ snap: lastSnap, sel: selectedId });
+  restoreState(undoStack.pop());
+  syncHistoryButtons();
+}
+function redo() {
+  commitHistory();
+  if (!redoStack.length) return;
+  undoStack.push({ snap: lastSnap, sel: selectedId });
+  restoreState(redoStack.pop());
+  syncHistoryButtons();
+}
+function syncHistoryButtons() {
+  $id('btn-undo').disabled = !undoStack.length;
+  $id('btn-redo').disabled = !redoStack.length;
+  refreshPresetUI();
+}
+
+function initHistory() {
+  const later = () => setTimeout(commitHistory, 0);
+  ['pointerup', 'change', 'click', 'keyup'].forEach(t => window.addEventListener(t, later, true));
+  window.addEventListener('wheel', () => { clearTimeout(wheelTimer); wheelTimer = setTimeout(commitHistory, 400); }, true);
+  window.addEventListener('keydown', e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (tag === 'INPUT' && document.activeElement.type === 'text') return;
+    const k = e.key.toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
+  });
+  $id('btn-undo').addEventListener('click', undo);
+  $id('btn-redo').addEventListener('click', redo);
+  commitHistory();
+}
+
+// ── Presets ──────────────────────────────────────────────────────────
+// Mismo formato que el plugin (XML <ExcellecuPreset>, extensión .excellecu): un preset hecho
+// aquí se abre en el plugin y al revés. Los propios se guardan en este navegador
+// (localStorage) y se pueden exportar e importar como archivo. Cargar un preset no toca el
+// motor ni la ventana.
+const PRESET_VERSION = 1;
+const KEYS = ['st', 'l', 'r', 'm', 's'];
+const PRESET_STORE = 'excellecu.presets';
+let presetName = 'Plano', presetRef = null;   // presetRef: estado del preset cargado (para "modificado")
+
+// De fábrica: { type, edit, sets: { key: {fc, gain, q, slope?, on?} } }, como en el plugin
+const FACTORY = [
+  { name: 'Plano', bands: [] },
+  // TDM: curva de referencia de Javhastudios (creada en el Pro-Q 3; capturas del 26/11/2026)
+  { name: 'TDM', bands: [
+    { type: 'bell', edit: 'st', sets: { st: { fc: 1550, gain: 1.0, q: 0.41 } } },
+    { type: 'hs',   edit: 'st', sets: { st: { fc: 20000, gain: 1.7, q: 0.49 } } },
+    { type: 'hs',   edit: 's',  sets: { st: { fc: 388, gain: 0, q: 2 }, m: { fc: 388, gain: 0, q: 2 }, s: { fc: 388, gain: 0.5, q: 2 } } },
+    { type: 'bell', edit: 'm',  sets: { st: { fc: 60, gain: 0, q: 0.62 }, m: { fc: 60, gain: 1.0, q: 0.62 }, s: { fc: 105, gain: 0, q: 1 } } },
+    { type: 'bell', edit: 'st', sets: { st: { fc: 214, gain: -0.8, q: 4.28 } } },
+  ] },
+];
+
+function factoryState(f) {
+  const out = [];
+  const saved = bands; bands = []; let id = nextBandId;
+  for (const fb of f.bands) {
+    const b = makeBand(fb.type, fb.sets.st || {});
+    // Igual que el plugin: los juegos no indicados con la frecuencia de Estéreo y Q 1
+    for (const k of ['l', 'r', 'm', 's']) b.sets[k].q = 1;
+    for (const k of KEYS) if (fb.sets[k]) Object.assign(b.sets[k], fb.sets[k]);
+    if (!BAND_TYPES[fb.type].gain) for (const k of KEYS) b.sets[k].gain = 0;
+    b.edit = fb.edit;
+    b.lrFresh = !(fb.sets.l || fb.sets.r);
+    bands.push(b); out.push(b);
+  }
+  bands = saved;
+  return { bands: out, out: { l: 0, r: 0, m: 0, s: 0 } };
+}
+
+// Estado → XML (mismos identificadores que los parámetros del plugin)
+function presetXml(name, st) {
+  const esc = v => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  const P = (id, v) => `  <P id="${id}" v="${+(+v).toFixed(6)}"/>\n`;
+  let fresh = 0xfff, body = '';
+  st.bands.slice(0, MAX_BANDS).forEach((b, i) => {
+    const n = i + 1;
+    if (!b.lrFresh) fresh &= ~(1 << i);
+    body += P(`b${n}_used`, 1) + P(`b${n}_type`, TYPE_ORDER.indexOf(b.type)) + P(`b${n}_edit`, KEYS.indexOf(b.edit));
+    for (const k of KEYS) {
+      const p = b.sets[k];
+      body += P(`b${n}_${k}_on`, p.on ? 1 : 0) + P(`b${n}_${k}_fc`, p.fc) + P(`b${n}_${k}_gain`, p.gain)
+            + P(`b${n}_${k}_q`, p.q) + P(`b${n}_${k}_slope`, Math.max(0, SLOPES.indexOf(p.slope)));
+    }
+  });
+  const o = st.out;
+  body += P('out_mode', o.mode === 'ms' ? 1 : 0) + P('out_link', o.link === false ? 0 : 1)
+        + P('out_l', o.l) + P('out_r', o.r) + P('out_m', o.m) + P('out_s', o.s);
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.21" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
+}
+
+// XML → estado. Lo que falta toma el valor por defecto del plugin; lo desconocido se ignora.
+function parsePresetXml(text) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  const root = doc.documentElement;
+  if (!root || root.nodeName !== 'ExcellecuPreset') return null;
+  const v = {};
+  for (const e of root.getElementsByTagName('P')) v[e.getAttribute('id')] = parseFloat(e.getAttribute('v'));
+  const get = (id, def) => (id in v && isFinite(v[id])) ? v[id] : def;
+  const fresh = parseInt(root.getAttribute('lrFresh') ?? '4095');
+  const out = [];
+  const saved = bands; bands = [];
+  for (let i = 0; i < MAX_BANDS; i++) {
+    const n = i + 1;
+    if (get(`b${n}_used`, 0) < 0.5) continue;
+    const type = TYPE_ORDER[Math.min(4, Math.max(0, Math.round(get(`b${n}_type`, 0))))] || 'bell';
+    const b = makeBand(type);
+    b.edit = KEYS[Math.min(4, Math.max(0, Math.round(get(`b${n}_edit`, 0))))];
+    b.lrFresh = ((fresh >> i) & 1) === 1;
+    for (const k of KEYS) {
+      b.sets[k] = {
+        on: get(`b${n}_${k}_on`, 1) > 0.5,
+        fc: Math.min(20000, Math.max(20, get(`b${n}_${k}_fc`, 1000))),
+        gain: BAND_TYPES[type].gain ? Math.min(12, Math.max(-20, get(`b${n}_${k}_gain`, 0))) : 0,
+        q: roundQ(Math.min(10, Math.max(0.1, get(`b${n}_${k}_q`, 1)))),
+        slope: SLOPES[Math.min(3, Math.max(0, Math.round(get(`b${n}_${k}_slope`, 1))))],
+      };
+    }
+    bands.push(b); out.push(b);
+  }
+  bands = saved;
+  return {
+    name: root.getAttribute('name') || '',
+    bands: out,
+    out: { mode: get('out_mode', 0) > 0.5 ? 'ms' : 'lr', link: get('out_link', 1) > 0.5,
+           l: clampOut(get('out_l', 0)), r: clampOut(get('out_r', 0)), m: clampOut(get('out_m', 0)), s: clampOut(get('out_s', 0)) },
+  };
+}
+
+// Lo que cuenta para "modificado": el XML sin nombre (colores e ids de banda no cuentan)
+const presetKey = () => presetXml('', { bands, out: outGain });
+
+function userPresets() {
+  try { return JSON.parse(localStorage.getItem(PRESET_STORE) || '{}'); } catch (e) { return {}; }
+}
+function storeUserPresets(obj) {
+  try { localStorage.setItem(PRESET_STORE, JSON.stringify(obj)); return true; }
+  catch (e) { alert('Este navegador no deja guardar presets en este archivo. Usa «Exportar».'); return false; }
+}
+function presetList() {
+  const user = userPresets();
+  return [...FACTORY.map((f, i) => ({ name: f.name, factory: i })),
+          ...Object.keys(user).sort((a, b) => a.localeCompare(b, 'es', { numeric: true })).map(n => ({ name: n, xml: user[n] }))];
+}
+
+function applyPresetState(st, name) {
+  const keepOut = { mode: outGain.mode, link: outGain.link };
+  bands = []; nextBandId = 1;
+  // Se recrean con makeBand para que los colores salgan en orden
+  for (const sb of st.bands) { const b = makeBand(sb.type); b.edit = sb.edit; b.lrFresh = sb.lrFresh; b.sets = JSON.parse(JSON.stringify(sb.sets)); bands.push(b); }
+  Object.assign(outGain, keepOut, st.out);
+  selectedId = null;
+  presetName = name;
+  syncPanel(); syncOut(); updateCharts(); updateOutLive();
+  presetRef = presetKey();
+  refreshPresetUI();
+}
+
+function loadPresetEntry(e) {
+  if (!e) return;
+  if (e.factory !== undefined) { applyPresetState(factoryState(FACTORY[e.factory]), e.name); return; }
+  const st = parsePresetXml(e.xml);
+  if (!st) { alert(`No se ha podido leer el preset «${e.name}».`); return; }
+  applyPresetState(st, e.name);
+}
+
+function refreshPresetUI() {
+  const sel = $id('preset-sel');
+  if (!sel || typeof sel.options === 'undefined') return;   // pruebas sin DOM real
+  const list = presetList();
+  const wanted = list.map(e => e.name).join('\u0001');
+  if (sel.dataset.list !== wanted) {
+    sel.innerHTML = '';
+    const gF = document.createElement('optgroup'); gF.label = 'De fábrica';
+    const gU = document.createElement('optgroup'); gU.label = 'Propios';
+    list.forEach((e, i) => {
+      const o = document.createElement('option'); o.value = i; o.textContent = e.name;
+      (e.factory !== undefined ? gF : gU).appendChild(o);
+    });
+    sel.appendChild(gF); if (gU.children.length) sel.appendChild(gU);
+    sel.dataset.list = wanted;
+  }
+  const idx = list.findIndex(e => e.name === presetName);
+  sel.value = idx >= 0 ? String(idx) : '';
+  $id('preset-mod').textContent = presetRef !== null && presetKey() !== presetRef ? '· modificado' : '';
+  $id('preset-del').disabled = !(idx >= 0 && list[idx].factory === undefined);
+}
+
+function downloadText(text, fileName) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/xml' }));
+  const a = document.createElement('a'); a.href = url; a.download = fileName; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+const safeName = n => n.trim().replace(/[\\/:*?"<>|]/g, '_').slice(0, 80);
+
+function initPresets() {
+  $id('preset-sel').addEventListener('change', function () { loadPresetEntry(presetList()[parseInt(this.value)]); });
+  const step = d => {
+    const list = presetList(), cur = list.findIndex(e => e.name === presetName), n = list.length;
+    loadPresetEntry(list[cur < 0 ? (d > 0 ? 0 : n - 1) : ((cur + d) % n + n) % n]);
+  };
+  $id('preset-prev').addEventListener('click', () => step(-1));
+  $id('preset-next').addEventListener('click', () => step(1));
+  $id('preset-save').addEventListener('click', () => {
+    const typed = prompt('Nombre del preset:', FACTORY.some(f => f.name === presetName) ? '' : presetName);
+    if (typed === null) return;
+    const name = safeName(typed);
+    if (!name) return;
+    if (FACTORY.some(f => f.name === name)) { alert(`«${name}» es un preset de fábrica. Elige otro nombre.`); return; }
+    const user = userPresets();
+    if (user[name] && !confirm(`Ya existe «${name}». ¿Reemplazarlo?`)) return;
+    user[name] = presetXml(name, { bands, out: outGain });
+    if (!storeUserPresets(user)) return;
+    presetName = name; presetRef = presetKey();
+    refreshPresetUI();
+  });
+  $id('preset-del').addEventListener('click', () => {
+    const user = userPresets();
+    if (!user[presetName] || !confirm(`¿Borrar el preset «${presetName}»?`)) return;
+    delete user[presetName];
+    storeUserPresets(user);
+    presetRef = null;
+    refreshPresetUI();
+  });
+  $id('preset-export').addEventListener('click', () => {
+    downloadText(presetXml(presetName, { bands, out: outGain }), safeName(presetName || 'preset') + '.excellecu');
+  });
+  $id('preset-import').addEventListener('click', () => $id('preset-file').click());
+  $id('preset-file').addEventListener('change', async function () {
+    const f = this.files && this.files[0];
+    this.value = '';
+    if (!f) return;
+    const text = await f.text();
+    const st = parsePresetXml(text);
+    if (!st) { alert(`«${f.name}» no es un preset de Excellecu.`); return; }
+    let name = safeName(f.name.replace(/\.(excellecu|xml)$/i, '')) || st.name || 'Importado';
+    if (FACTORY.some(fp => fp.name === name)) name += ' (importado)';   // no tapar uno de fábrica
+    const user = userPresets();
+    user[name] = text;
+    storeUserPresets(user);   // queda en la lista; si el navegador no deja, se carga igual
+    applyPresetState(st, name);
+    commitHistory();
+  });
+  presetRef = presetKey();
+  refreshPresetUI();
+}
+
 window.addEventListener('resize', () => { initChartWidth(); updateCharts(); });
 initChartWidth();
 initPanel();
@@ -1959,6 +2505,10 @@ $id('eng-exact').addEventListener('click', () => setEngine('exact'));
 $id('eng-classic').addEventListener('click', () => setEngine('classic'));
 setEngine(engine);
 initHandleEvents();
+initOut();
+initMeters();
+initPresets();
+initHistory();
 syncPanel();
 updateCharts();
 </script>
