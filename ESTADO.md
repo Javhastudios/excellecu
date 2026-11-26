@@ -177,7 +177,9 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
 - Quitar la fase plegada de la web al final del desarrollo.
 - Confirmar el canal de la banda 3 de la TDM (Side o Mid).
 
-- EQ: codo suave en HPF/LPF; high shelf cerca de Nyquist (−0,3 dB a 20 kHz frente a la TDM del
-  Pro-Q); filtro de 16 384 a 88,2/96 kHz; modo de fase mínima opcional.
+- EQ: codo suave en HPF/LPF; filtro de 16 384 a 88,2/96 kHz; modo de fase mínima opcional.
+- Descartado (26/11): igualar el high shelf al del Pro-Q. La TDM es solo una curva de prueba y la
+  forma de media gaussiana es parte del carácter. Con la v0.22 la TDM da +1,71 dB a 20 kHz (filtro
+  real = curva ideal hasta Nyquist); los −0,3 dB eran de una medida con la v0.17.
 - Beta: true peak / LUFS y vista M/S en los medidores; ranuras A/B; inversor de polaridad.
 - Ideas en el documento del proyecto (flat tilt, Gain Scale, teclado, forma de campana…).
