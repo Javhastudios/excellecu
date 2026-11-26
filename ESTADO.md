@@ -66,6 +66,10 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
 - Plugin Doctor (26/11, TDM, Performance, bloque de 16 384): Excellecu v0.25 ~1,0 ms, Pro-Q 3
   ~0,65 ms. Con la v0.23 eran ~3,6 y ~1,3 ms; el Pro-Q también bajó (otras condiciones), así que
   lo comparable es la proporción: de ~2,8 veces el Pro-Q a ~1,5 veces.
+- Bypass comprobado en Ableton (26/11): dos pistas con Excellecu plano, una con la polaridad
+  invertida; con el dispositivo apagado en una de ellas sigue habiendo silencio total, así que
+  Ableton usa nuestro bypass y el audio puenteado sale con la latencia correcta. Con curva, el
+  residuo es lo que hace el EQ.
 - Versión: plugin 0.25.0, igual que la web (la web v0.24 fue el analizador; el plugin salta de
   0.23 a 0.25). El analizador sigue solo en la web.
 
