@@ -821,6 +821,45 @@ int main (int argc, char** argv)
             p.selected = 3;
             MessageManager::getInstance()->runDispatchLoopUntil (200);
             snapshot (*ed, outDir.getChildFile ("08_minimo.png"));
+            // Salida enlazada: al arrastrar un deslizador, el otro se mueve en tiempo real (antes de soltar)
+            {
+                std::vector<Slider*> outs;
+                std::function<void (Component&)> find = [&] (Component& c) {
+                    for (auto* ch : c.getChildren())
+                    {
+                        if (auto* sl = dynamic_cast<Slider*> (ch))
+                            if (sl->getMinimum() == -24.0 && sl->getMaximum() == 12.0) outs.push_back (sl);
+                        find (*ch);
+                    }
+                };
+                find (*ed);
+                setPlain (p, "out_mode", 0.0f);
+                setPlain (p, "out_link", 1.0f);
+                setPlain (p, "out_l", 0.0f);
+                setPlain (p, "out_r", 0.0f);
+                MessageManager::getInstance()->runDispatchLoopUntil (100);
+                if (outs.size() == 2)
+                {
+                    Slider& a = *outs[0];
+                    Slider& b = *outs[1];
+                    auto src = Desktop::getInstance().getMainMouseSource();
+                    const auto t0 = Time::getCurrentTime();
+                    auto ev = [&] (float x, bool dragged) {
+                        return MouseEvent (src, { x, (float) a.getHeight() / 2 }, ModifierKeys (ModifierKeys::leftButtonModifier), 1.0f, 0, 0, 0, 0,
+                                           &a, &a, t0, { (float) a.getWidth() * 0.6667f, (float) a.getHeight() / 2 }, t0, 1, dragged);
+                    };
+                    const float x0 = (float) a.getWidth() * 0.6667f;   // 0 dB está a 2/3 del recorrido (−24 … +12)
+                    a.mouseDown (ev (x0, false));
+                    a.mouseDrag (ev (x0 + (float) a.getWidth() * 0.15f, true));
+                    const double during = b.getValue(), moved = a.getValue();
+                    a.mouseUp (ev (x0 + (float) a.getWidth() * 0.15f, true));
+                    check (moved > 2.0 && std::abs (during - moved) < 0.11,
+                           "salida enlazada: el otro deslizador sigue al arrastrado antes de soltar (" + String (moved, 1) + " / " + String (during, 1) + " dB)");
+                    setPlain (p, "out_l", 0.0f);
+                    setPlain (p, "out_r", 0.0f);
+                }
+                else check (false, "encontrar los dos deslizadores de salida (" + String ((int) outs.size()) + ")");
+            }
             // Escuchar la banda seleccionada (el botón se ve activo; la gráfica sigue enseñando la curva)
             p.soloOn = true;
             MessageManager::getInstance()->runDispatchLoopUntil (100);

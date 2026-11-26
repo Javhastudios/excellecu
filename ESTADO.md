@@ -12,6 +12,13 @@ Original: `web/eq-dft-proto.html` (ahora v0.21). Objetivo: medirlo en Plugin Doc
 iterando. **Acuerdo (26/11/2026): cada avance del plugin se hace también en el HTML**, que Javier
 guarda como archivo; el HTML conserva además los motores Clásico, la ventana y el overlap.
 
+## En la rama `trabajo` (sin compilar)
+
+- **Salida enlazada:** al arrastrar un deslizador, el otro no se movía en pantalla hasta soltar
+  el ratón (el sonido sí era correcto). `OutputPanel::refresh` dejaba quietos los dos mientras se
+  arrastraba; ahora solo deja quieto el arrastrado (`dragRow`). Prueba de humo con un arrastre
+  simulado (falla con el código anterior). En la web ya iba bien.
+
 ## v0.25 (26/11/2026): bypass alineado, menos CPU, letra legible y analizador en la web
 
 - **Bypass sin desalinear:** parámetro propio `bypass` que el plugin ofrece al DAW

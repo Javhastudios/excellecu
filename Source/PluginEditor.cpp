@@ -304,8 +304,8 @@ OutputPanel::OutputPanel (ExcellecuProcessor& p, ui::BandModel& m, std::function
         sl.setRange (-24.0, 12.0, 0.1);
         sl.setDoubleClickReturnValue (true, 0.0);
         sl.getProperties().set ("thumb", (int64) theme::accent.getARGB());
-        sl.onDragStart = [this] { dragging = true; gestures (true); };
-        sl.onDragEnd = [this] { gestures (false); dragging = false; onChange(); };
+        sl.onDragStart = [this, r] { dragging = true; dragRow = r; gestures (true); };
+        sl.onDragEnd = [this] { gestures (false); dragging = false; dragRow = nullptr; onChange(); };
         sl.onValueChange = [this, r] { valueChanged (*r); };
     }
     refresh();
@@ -364,7 +364,8 @@ void OutputPanel::refresh()
     {
         const float v = db (outIndex (r->which));
         r->valueText = fmt::gain (v);
-        if (! dragging) r->slider.setValue (v, dontSendNotification);
+        // Solo se deja quieto el que se está arrastrando: el otro sigue al parámetro en tiempo real
+        if (! dragging || r != dragRow) r->slider.setValue (v, dontSendNotification);
     }
     // La otra pareja también suena: se avisa si no está a 0 dB
     const int o = ms ? 0 : 2;

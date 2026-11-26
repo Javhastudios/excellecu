@@ -84,6 +84,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> outLinkAtt;
     OutRow outA, outB;
     bool dragging = false;
+    const OutRow* dragRow = nullptr;   // el deslizador que se arrastra (el otro se mueve con él si están enlazados)
     float start[4] {};
     juce::String noteText;
     juce::Rectangle<int> title, note;
