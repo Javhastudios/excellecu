@@ -18,6 +18,16 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <memory>
+
+// En macOS el plugin usa la FFT de Accelerate (vDSP), mucho más rápida; las pruebas comparan las
+// dos versiones muestra a muestra (paso de macOS en GitHub Actions).
+#if defined(__APPLE__) && defined(EX_USE_ACCELERATE)
+ #include <Accelerate/Accelerate.h>
+ #define EX_FFT_ACCELERATE 1
+#else
+ #define EX_FFT_ACCELERATE 0
+#endif
 #include <vector>
 
 #if defined(__clang__)
@@ -236,52 +246,100 @@ inline void hannWindow (int n, double* w)
 class Fft
 {
 public:
-    explicit Fft (int size) : n (size), rev ((size_t) size), cosT ((size_t) size / 2), sinT ((size_t) size / 2)
+    // FFT en el sitio (sin escalar: X[k] = Σ x[j]·e^(−2πi·jk/n)), con la entrada en orden de bits
+    // invertidos y etapas radix 4 (una radix 2 al principio si log2 n es impar): menos
+    // multiplicaciones y la mitad de pasadas por memoria que todo radix 2. Las tablas de cada
+    // etapa son contiguas para que el compilador vectorice el bucle interior.
+    explicit Fft (int size) : n (size)
     {
         int bits = 0;
         while ((1 << bits) < n) ++bits;
+        log2n = bits;
+#if EX_FFT_ACCELERATE
+        setup.reset (vDSP_create_fftsetupD ((vDSP_Length) bits, kFFTRadix2));
+        return;
+#endif
         for (int i = 0; i < n; ++i)
         {
             int r = 0;
             for (int b = 0; b < bits; ++b) if (i & (1 << b)) r |= 1 << (bits - 1 - b);
-            rev[(size_t) i] = r;
+            if (r > i) { swapA.push_back (i); swapB.push_back (r); }
         }
-        for (int k = 0; k < n / 2; ++k)
+        // Etapas radix 4: de L/4 a L. Si log2 n es impar, la primera es radix 2 (de 1 a 2).
+        int len = (bits % 2 == 1) ? 8 : 4;
+        for (; len <= n; len <<= 2)
         {
-            const double angle = -2 * PI * k / n;
-            cosT[(size_t) k] = std::cos (angle);
-            sinT[(size_t) k] = std::sin (angle);
+            stageLen.push_back (len);
+            stageOffset.push_back ((int) w1r.size());
+            const int q = len / 4;
+            for (int k = 0; k < q; ++k)
+            {
+                const double a1 = -2 * PI * k / len;
+                w1r.push_back (std::cos (a1));     w1i.push_back (std::sin (a1));
+                w2r.push_back (std::cos (2 * a1)); w2i.push_back (std::sin (2 * a1));
+                w3r.push_back (std::cos (3 * a1)); w3i.push_back (std::sin (3 * a1));
+            }
         }
     }
 
     void forward (double* re, double* im) const
     {
-        for (int i = 0; i < n; ++i)
+#if EX_FFT_ACCELERATE
+        DSPDoubleSplitComplex sc { re, im };   // vDSP: transformada directa sin escalar, como la portable
+        vDSP_fft_zipD (setup.get(), &sc, 1, (vDSP_Length) log2n, kFFTDirection_Forward);
+        return;
+#endif
+        for (size_t t = 0; t < swapA.size(); ++t)
         {
-            const int j = rev[(size_t) i];
-            if (j > i) { std::swap (re[i], re[j]); std::swap (im[i], im[j]); }
+            const int i = swapA[t], j = swapB[t];
+            std::swap (re[i], re[j]); std::swap (im[i], im[j]);
         }
-        for (int len = 2; len <= n; len <<= 1)
+        if (log2n % 2 == 1)
+            for (int s = 0; s + 1 < n; s += 2)
+            {
+                const double eR = re[s], eI = im[s], oR = re[s + 1], oI = im[s + 1];
+                re[s] = eR + oR; im[s] = eI + oI;
+                re[s + 1] = eR - oR; im[s + 1] = eI - oI;
+            }
+        for (size_t st = 0; st < stageLen.size(); ++st)
         {
-            const int half = len / 2, step = n / len;
+            const int len = stageLen[st], q = len / 4, off = stageOffset[st];
+            const double* __restrict ar1 = w1r.data() + off; const double* __restrict ai1 = w1i.data() + off;
+            const double* __restrict ar2 = w2r.data() + off; const double* __restrict ai2 = w2i.data() + off;
+            const double* __restrict ar3 = w3r.data() + off; const double* __restrict ai3 = w3i.data() + off;
             for (int s = 0; s < n; s += len)
-                for (int k = 0; k < half; ++k)
+            {
+                double* __restrict r0 = re + s;         double* __restrict i0 = im + s;
+                double* __restrict r1 = re + s + q;     double* __restrict i1 = im + s + q;
+                double* __restrict r2 = re + s + 2 * q; double* __restrict i2 = im + s + 2 * q;
+                double* __restrict r3 = re + s + 3 * q; double* __restrict i3 = im + s + 3 * q;
+                for (int k = 0; k < q; ++k)
                 {
-                    const double wr = cosT[(size_t) (k * step)], wi = sinT[(size_t) (k * step)];
-                    double& oR = re[s + k + half]; double& oI = im[s + k + half];
-                    const double tr = wr * oR - wi * oI;
-                    const double ti = wr * oI + wi * oR;
-                    const double eR = re[s + k], eI = im[s + k];
-                    re[s + k] = eR + tr; im[s + k] = eI + ti;
-                    oR = eR - tr; oI = eI - ti;
+                    // Subtransformadas (en orden de bits invertidos): a = cuarto 0, b = cuarto 1,
+                    // c = cuarto 2, d = cuarto 3. X = a + W^2k·b + W^k·c + W^3k·d, etc.
+                    const double aR = r0[k], aI = i0[k];
+                    const double bR = r1[k] * ar2[k] - i1[k] * ai2[k], bI = r1[k] * ai2[k] + i1[k] * ar2[k];
+                    const double cR = r2[k] * ar1[k] - i2[k] * ai1[k], cI = r2[k] * ai1[k] + i2[k] * ar1[k];
+                    const double dR = r3[k] * ar3[k] - i3[k] * ai3[k], dI = r3[k] * ai3[k] + i3[k] * ar3[k];
+                    const double s0R = aR + bR, s0I = aI + bI, s1R = aR - bR, s1I = aI - bI;
+                    const double t0R = cR + dR, t0I = cI + dI, t1R = cR - dR, t1I = cI - dI;
+                    r0[k] = s0R + t0R; i0[k] = s0I + t0I;
+                    r2[k] = s0R - t0R; i2[k] = s0I - t0I;
+                    r1[k] = s1R + t1I; i1[k] = s1I - t1R;      // (a − W²b) − i·(W c − W³ d)
+                    r3[k] = s1R - t1I; i3[k] = s1I + t1R;      // (a − W²b) + i·(W c − W³ d)
                 }
+            }
         }
     }
 
 private:
-    int n;
-    std::vector<int> rev;
-    std::vector<double> cosT, sinT;
+    int n, log2n = 0;
+    std::vector<int> swapA, swapB, stageLen, stageOffset;
+    std::vector<double> w1r, w1i, w2r, w2i, w3r, w3i;
+#if EX_FFT_ACCELERATE
+    struct SetupDeleter { void operator() (OpaqueFFTSetupD* p) const { if (p != nullptr) vDSP_destroy_fftsetupD (p); } };
+    std::unique_ptr<OpaqueFFTSetupD, SetupDeleter> setup;
+#endif
 };
 
 // Respuesta por bin de un rol (real; las curvas tienen fase cero)
@@ -320,36 +378,70 @@ inline void computeResponse (const Params& p, int role, int n, double sr, Respon
 // ── Motor exacto: filtros en particiones ──────────────────────────────────
 // Las curvas se convierten en el mismo filtro de fase cero de N+1 muestras que en la web
 // (kernelSpectrum: respuesta real en una FFT de 2N, recorte a ±N/2 con ventana coseno). En
-// tiempo real se aplica por convolución particionada uniforme: el filtro, ya causal (retrasado
-// N/2), se parte en trozos de PART muestras y cada bloque de PART muestras de audio se
-// convoluciona con todos ellos en el dominio de la frecuencia (overlap-save, FFT de 2·PART).
-// El resultado es la misma convolución lineal que la web, con un coste repartido por igual en
-// cada bloque y latencia N/2 + PART en lugar de N.
-constexpr int PART = 256;                              // tamaño de partición (bloque de audio)
-constexpr int PART_FFT = 2 * PART;                     // FFT de cada partición
-constexpr int PART_BINS = PART + 1;                    // bins útiles (señal real)
-constexpr int MAX_PARTS = (MAX_N + 1 + PART - 1) / PART;
+// tiempo real el filtro, ya causal (retrasado N/2), se aplica por convolución particionada
+// NO uniforme (overlap-save en el dominio de la frecuencia):
+//   · nivel 0: trozos de PART = 256 muestras para el principio del filtro (taps 0 … 1023);
+//   · nivel 1: trozos de 1024 para el resto (desde el tap 1024).
+// Un trozo de tamaño B que empieza en el tap B solo necesita entrada ya completa, así que la cola
+// se calcula una vez por cada 1024 muestras sin añadir latencia. Es la misma convolución lineal
+// que la web (mismo resultado salvo redondeo, ~1e-14), con unas 2,5 veces menos operaciones que
+// con todos los trozos de 256. Latencia: N/2 + PART, como antes.
+constexpr int PART = 256;                              // tamaño de partición del nivel 0 (bloque de audio)
+constexpr int PART_FFT = 2 * PART;
+constexpr int PART_BINS = PART + 1;
 constexpr int FADE_LEN = 2048;                         // fundido al cambiar de filtro (muestras)
+constexpr int MAX_LEVELS = 2;
+constexpr int LEVEL_SIZE[MAX_LEVELS] = { 256, 1024 };  // tamaño de trozo de cada nivel
 
-inline int numParts (int n) { return (n + 1 + PART - 1) / PART; }
+// Cómo se reparte un filtro de n+1 taps entre los niveles
+struct Layout
+{
+    int levels = 0;
+    int size[MAX_LEVELS] {}, offset[MAX_LEVELS] {}, parts[MAX_LEVELS] {}, base[MAX_LEVELS] {};
+    int total = 0;                                     // bins guardados por filtro (todos los niveles)
+};
+
+inline Layout layoutFor (int n)
+{
+    Layout L;
+    const int taps = n + 1;
+    int start = 0;
+    for (int l = 0; l < MAX_LEVELS && start < taps; ++l)
+    {
+        const int b = LEVEL_SIZE[l];
+        const int end = (l + 1 < MAX_LEVELS) ? std::min (taps, LEVEL_SIZE[l + 1]) : taps;   // el nivel siguiente empieza en su propio tamaño
+        L.size[l] = b; L.offset[l] = start;
+        L.parts[l] = (end - start + b - 1) / b;
+        L.base[l] = L.total;
+        L.total += L.parts[l] * (b + 1);
+        L.levels = l + 1;
+        start = end;
+    }
+    return L;
+}
+
+inline int numParts (int n) { return (n + 1 + PART - 1) / PART; }   // trozos si fueran todos de 256 (informativo)
 // Latencia que declara el plugin para unos ajustes
 inline int latencyFor (int n) { return n / 2 + PART; }
+
+inline int maxBinsPerKernel() { return layoutFor (MAX_N).total; }
 
 // Filtros de un juego de ajustes, ya partidos y en el dominio de la frecuencia.
 // Estéreo: Lout = A·L + B·R, Rout = C·L + D·R (etapas L/R y M/S combinadas). Mono: H.
 struct KernelBank
 {
     enum { KA = 0, KB, KC, KD, KH, NUM = 5 };
-    int n = 0, nc = 0, parts = 0;
+    int n = 0, nc = 0;
     double sr = 0;
+    Layout layout;
     Params params;
-    std::array<std::vector<double>, NUM> re, im;       // parts × PART_BINS cada uno
+    std::array<std::vector<double>, NUM> re, im;       // layout.total bins cada uno
     std::array<bool, NUM> null {};
 
     KernelBank()
     {
-        for (auto& v : re) v.assign ((size_t) (MAX_PARTS * PART_BINS), 0.0);
-        for (auto& v : im) v.assign ((size_t) (MAX_PARTS * PART_BINS), 0.0);
+        for (auto& v : re) v.assign ((size_t) maxBinsPerKernel(), 0.0);
+        for (auto& v : im) v.assign ((size_t) maxBinsPerKernel(), 0.0);
         null.fill (true);
     }
     bool matches (const Params& p, int channels, double rate) const
@@ -364,15 +456,16 @@ struct KernelBank
 class KernelBuilder
 {
 public:
-    KernelBuilder() : fftPart (PART_FFT)
+    KernelBuilder()
     {
         for (int s = 0; s < (int) N_OPTIONS.size(); ++s) ffts2.emplace_back (2 * N_OPTIONS[(size_t) s]);
+        for (int l = 0; l < MAX_LEVELS; ++l) fftLevel.emplace_back (2 * LEVEL_SIZE[l]);
         for (auto& v : dense) v.assign (MAX_NF / 2 + 1, 1.0);
         freqs.assign (MAX_NF / 2 + 1, 0.0);
         mixG.assign (MAX_NF / 2 + 1, 0.0);
         tr.assign (MAX_NF, 0.0); ti.assign (MAX_NF, 0.0);
         hw.assign (MAX_NF, 0.0);
-        pr.assign (PART_FFT, 0.0); pi.assign (PART_FFT, 0.0);
+        pr.assign (2 * LEVEL_SIZE[MAX_LEVELS - 1], 0.0); pi.assign (2 * LEVEL_SIZE[MAX_LEVELS - 1], 0.0);
     }
 
     void build (const Params& p, double sr, int nc, KernelBank& out)
@@ -380,7 +473,7 @@ public:
         int sizeIdx = 0;
         for (int s = 0; s < (int) N_OPTIONS.size(); ++s) if (N_OPTIONS[(size_t) s] == p.n) sizeIdx = s;
         const int n = N_OPTIONS[(size_t) sizeIdx], nf = 2 * n, len = nf / 2 + 1;
-        out.n = n; out.nc = nc; out.sr = sr; out.parts = numParts (n); out.params = p;
+        out.n = n; out.nc = nc; out.sr = sr; out.layout = layoutFor (n); out.params = p;
 
         for (int role = 0; role < 4; ++role)
         {
@@ -411,7 +504,7 @@ public:
 
 private:
     // kernelSpectrum de la web hasta el filtro recortado; luego se hace causal (retraso N/2) y se
-    // parte en trozos de PART muestras, cada uno con su FFT de 2·PART.
+    // reparte en los trozos de cada nivel, cada uno con su FFT de 2·tamaño.
     void makeKernel (const double* G, int sizeIdx, KernelBank& out, int kid)
     {
         const int n = N_OPTIONS[(size_t) sizeIdx], nf = 2 * n, half = n / 2;
@@ -439,27 +532,27 @@ private:
             h[j] = r[m >= 0 ? m : nf + m] * inv * w;
         }
 
-        const int parts = numParts (n);
+        const Layout& L = out.layout;
         double* dr = out.re[(size_t) kid].data(); double* di = out.im[(size_t) kid].data();
-        for (int q = 0; q < parts; ++q)
+        for (int l = 0; l < L.levels; ++l)
         {
-            std::fill (pr.begin(), pr.end(), 0.0); std::fill (pi.begin(), pi.end(), 0.0);
-            for (int j = 0; j < PART; ++j)
+            const int b = L.size[l], bins = b + 1;
+            for (int q = 0; q < L.parts[l]; ++q)
             {
-                const int idx = q * PART + j;
-                if (idx <= n) pr[(size_t) j] = h[idx];
-            }
-            fftPart.forward (pr.data(), pi.data());
-            for (int b = 0; b < PART_BINS; ++b)
-            {
-                dr[q * PART_BINS + b] = pr[(size_t) b];
-                di[q * PART_BINS + b] = pi[(size_t) b];
+                std::fill (pr.begin(), pr.begin() + 2 * b, 0.0); std::fill (pi.begin(), pi.begin() + 2 * b, 0.0);
+                for (int j = 0; j < b; ++j)
+                {
+                    const int idx = L.offset[l] + q * b + j;
+                    if (idx <= n) pr[(size_t) j] = h[idx];
+                }
+                fftLevel[(size_t) l].forward (pr.data(), pi.data());
+                double* kr = dr + L.base[l] + q * bins; double* ki = di + L.base[l] + q * bins;
+                for (int k = 0; k < bins; ++k) { kr[k] = pr[(size_t) k]; ki[k] = pi[(size_t) k]; }
             }
         }
     }
 
-    Fft fftPart;
-    std::vector<Fft> ffts2;
+    std::vector<Fft> ffts2, fftLevel;
     std::array<std::vector<double>, 4> dense;
     std::vector<double> freqs, mixG, tr, ti, hw, pr, pi;
 };
@@ -470,15 +563,30 @@ class Engine
 public:
     static constexpr int NUM_SLOTS = 4;   // filtro actual, anterior (fundido), publicado y en cálculo
 
-    Engine() : fftPart (PART_FFT)
+    Engine()
     {
-        for (auto& v : fdlRe) v.assign ((size_t) (MAX_PARTS * PART_BINS), 0.0);
-        for (auto& v : fdlIm) v.assign ((size_t) (MAX_PARTS * PART_BINS), 0.0);
-        for (auto& v : frame) v.assign (PART_FFT, 0.0);
+        for (int l = 0; l < MAX_LEVELS; ++l)
+        {
+            auto& v = lv[(size_t) l];
+            const int b = LEVEL_SIZE[l];
+            v.size = b;
+            v.fft = std::make_unique<Fft> (2 * b);
+            const int maxParts = std::max (1, layoutFor (MAX_N).parts[l]);
+            for (int c = 0; c < 2; ++c)
+            {
+                v.fdlRe[(size_t) c].assign ((size_t) (maxParts * (b + 1)), 0.0);
+                v.fdlIm[(size_t) c].assign ((size_t) (maxParts * (b + 1)), 0.0);
+                v.frame[(size_t) c].assign ((size_t) (2 * b), 0.0);
+                v.tailCur[(size_t) c].assign ((size_t) b, 0.0);
+                v.tailPrev[(size_t) c].assign ((size_t) b, 0.0);
+            }
+            v.workRe.assign ((size_t) (2 * b), 0.0); v.workIm.assign ((size_t) (2 * b), 0.0);
+            v.y0Re.assign ((size_t) (b + 1), 0.0); v.y0Im.assign ((size_t) (b + 1), 0.0);
+            v.y1Re.assign ((size_t) (b + 1), 0.0); v.y1Im.assign ((size_t) (b + 1), 0.0);
+        }
         for (auto& v : outBlk) v.assign (PART, 0.0);
         for (auto& v : yNew) v.assign (PART, 0.0);
         for (auto& v : yOld) v.assign (PART, 0.0);
-        accRe.assign (PART_FFT, 0.0); accIm.assign (PART_FFT, 0.0);
         for (auto& s : slotState) s.store (SlotFree);
         applyLayout();
     }
@@ -493,11 +601,20 @@ public:
 
     void reset()
     {
-        for (auto& v : fdlRe) std::fill (v.begin(), v.end(), 0.0);
-        for (auto& v : fdlIm) std::fill (v.begin(), v.end(), 0.0);
-        for (auto& v : frame) std::fill (v.begin(), v.end(), 0.0);
+        for (auto& v : lv)
+        {
+            for (int c = 0; c < 2; ++c)
+            {
+                std::fill (v.fdlRe[(size_t) c].begin(), v.fdlRe[(size_t) c].end(), 0.0);
+                std::fill (v.fdlIm[(size_t) c].begin(), v.fdlIm[(size_t) c].end(), 0.0);
+                std::fill (v.frame[(size_t) c].begin(), v.frame[(size_t) c].end(), 0.0);
+                std::fill (v.tailCur[(size_t) c].begin(), v.tailCur[(size_t) c].end(), 0.0);
+                std::fill (v.tailPrev[(size_t) c].begin(), v.tailPrev[(size_t) c].end(), 0.0);
+            }
+            v.head = 0; v.fill = 0;
+        }
         for (auto& v : outBlk) std::fill (v.begin(), v.end(), 0.0);
-        idx = 0; fdlHead = 0;
+        idx = 0;
     }
 
     void setParams (const Params& np)
@@ -540,11 +657,21 @@ public:
 private:
     enum SlotState { SlotFree = 0, SlotWriting, SlotReady, SlotInUse };
 
+    // Estado de un nivel de la convolución
+    struct Level
+    {
+        int size = 0, head = 0, fill = 0;              // fill: muestras ya puestas en el bloque en curso
+        std::unique_ptr<Fft> fft;
+        std::array<std::vector<double>, 2> fdlRe, fdlIm, frame, tailCur, tailPrev;
+        std::vector<double> workRe, workIm, y0Re, y0Im, y1Re, y1Im;
+    };
+
     void applyLayout()
     {
         int sizeIdx = 0;
         for (int s = 0; s < (int) N_OPTIONS.size(); ++s) if (N_OPTIONS[(size_t) s] == p.n) sizeIdx = s;
         p.n = N_OPTIONS[(size_t) sizeIdx];
+        layout = layoutFor (p.n);
     }
 
     // ── Ranuras de filtros (sin bloqueos) ─────────────────────────────────────
@@ -570,8 +697,8 @@ private:
 
     void releaseSlot (int s) { if (s >= 0) slotState[(size_t) s].store (SlotFree); }
 
-    // Al cambiar de tamaño de ventana, de motor o de frecuencia de muestreo: los filtros
-    // anteriores ya no sirven (solo desde el hilo de audio).
+    // Al cambiar de tamaño de ventana o de frecuencia de muestreo: los filtros anteriores ya no
+    // sirven (solo desde el hilo de audio).
     void dropKernels()
     {
         releaseSlot (cur); cur = -1;
@@ -588,14 +715,22 @@ private:
         if (s < 0) return;
         slotState[(size_t) s].store (SlotInUse);
         if (! banks[(size_t) s].sameLayout (p.n, nc, sr)) { releaseSlot (s); return; }
-        startFade (s);
+        startFade (s, nc);
     }
 
-    void startFade (int s)
+    // Filtro nuevo. Las colas de los niveles 1… del bloque grande en curso se calculan ya con él
+    // (la entrada que necesitan está en la línea de retardo); las del filtro anterior se guardan
+    // para el fundido.
+    void startFade (int s, int nc)
     {
-        if (cur < 0) { cur = s; return; }                     // primer filtro: sin fundido
-        releaseSlot (prev);
-        prev = cur; cur = s; fadePos = 0;
+        if (cur >= 0)
+        {
+            releaseSlot (prev);
+            prev = cur; fadePos = 0;
+            for (int l = 1; l < layout.levels; ++l) std::swap (lv[(size_t) l].tailCur, lv[(size_t) l].tailPrev);
+        }
+        cur = s;
+        for (int l = 1; l < layout.levels; ++l) levelOutput (banks[(size_t) cur], l, nc, lv[(size_t) l].tailCur);
     }
 
     // Cálculo en el propio hilo de audio
@@ -605,7 +740,7 @@ private:
         if (s < 0) return;
         syncBuilder.build (p, sr, nc, banks[(size_t) s]);
         slotState[(size_t) s].store (SlotInUse);
-        startFade (s);
+        startFade (s, nc);
     }
 
     void processExact (float* const* ch, int numCh, int numSamples)
@@ -628,11 +763,12 @@ private:
             return;
         }
 
+        auto& f0 = lv[0].frame;
         for (int i = 0; i < numSamples; ++i)
         {
             for (int c = 0; c < nc; ++c)
             {
-                frame[(size_t) c][(size_t) (PART + idx)] = ch[c][i];
+                f0[(size_t) c][(size_t) (PART + idx)] = ch[c][i];
                 ch[c][i] = (float) outBlk[(size_t) c][(size_t) idx];
             }
             if (++idx == PART)
@@ -644,81 +780,129 @@ private:
         for (int c = nc; c < numCh; ++c) std::memset (ch[c], 0, sizeof (float) * (size_t) numSamples);
     }
 
-    // Y = Σ_q K[q]·X[bloque − q] (+ el mismo con la segunda entrada), en bins 0 … PART
-    void accumulate (const KernelBank& bank, int k1, int src1, int k2, int src2)
+    // Trama de 2·B (bloque anterior + actual) de un nivel → FFT → su línea de retardo. En estéreo,
+    // L y R van juntos en una sola FFT compleja (L real, R imaginaria) y luego se separan.
+    void pushFrame (Level& v, int parts, int nc)
     {
-        std::fill (accRe.begin(), accRe.begin() + PART_BINS, 0.0);
-        std::fill (accIm.begin(), accIm.begin() + PART_BINS, 0.0);
-        const int parts = bank.parts;
-        const int kids[2] = { k1, k2 }, srcs[2] = { src1, src2 };
-        for (int t = 0; t < 2; ++t)
+        const int b = v.size, n2 = 2 * b, bins = b + 1;
+        v.head = (v.head + 1) % parts;
+        double* ar = v.workRe.data(); double* ai = v.workIm.data();
+        const double* fl = v.frame[0].data();
+        const double* fr = v.frame[1].data();
+        if (nc == 2) { for (int j = 0; j < n2; ++j) { ar[j] = fl[j]; ai[j] = fr[j]; } }
+        else         { for (int j = 0; j < n2; ++j) { ar[j] = fl[j]; ai[j] = 0.0; } }
+        v.fft->forward (ar, ai);
+        double* lr = v.fdlRe[0].data() + v.head * bins; double* li = v.fdlIm[0].data() + v.head * bins;
+        if (nc == 2)
         {
-            const int kid = kids[t], src = srcs[t];
-            if (kid < 0 || src < 0 || bank.null[(size_t) kid]) continue;
-            const double* kr = bank.re[(size_t) kid].data();
-            const double* ki = bank.im[(size_t) kid].data();
-            const double* xr = fdlRe[(size_t) src].data();
-            const double* xi = fdlIm[(size_t) src].data();
-            for (int q = 0; q < parts; ++q)
+            double* rr = v.fdlRe[1].data() + v.head * bins; double* ri = v.fdlIm[1].data() + v.head * bins;
+            for (int k = 0; k < bins; ++k)
             {
-                int slot = fdlHead - q;
-                if (slot < 0) slot += parts;
-                const double* a = kr + q * PART_BINS; const double* b = ki + q * PART_BINS;
-                const double* c = xr + slot * PART_BINS; const double* d = xi + slot * PART_BINS;
-                for (int k = 0; k < PART_BINS; ++k)
-                {
-                    accRe[(size_t) k] += a[k] * c[k] - b[k] * d[k];
-                    accIm[(size_t) k] += a[k] * d[k] + b[k] * c[k];
-                }
+                const int nk = (n2 - k) & (n2 - 1);
+                const double a = ar[k], bb = ai[k], c = ar[nk], d = ai[nk];
+                lr[k] = 0.5 * (a + c); li[k] = 0.5 * (bb - d);   // X_L = (Z[k] + conj Z[N−k]) / 2
+                rr[k] = 0.5 * (bb + d); ri[k] = 0.5 * (c - a);   // X_R = (Z[k] − conj Z[N−k]) / 2i
+            }
+        }
+        else
+        {
+            for (int k = 0; k < bins; ++k) { lr[k] = ar[k]; li[k] = ai[k]; }
+        }
+        for (int c = 0; c < nc; ++c) { double* f = v.frame[(size_t) c].data(); std::copy (f + b, f + n2, f); }
+    }
+
+    // Y += Σ_q K[q]·X[head − q] para un filtro (kid) sobre una entrada (src), en un nivel
+    void mac (const KernelBank& bank, int l, int kid, int src, double* yr, double* yi)
+    {
+        if (bank.null[(size_t) kid]) return;
+        const Level& v = lv[(size_t) l];
+        const int bins = v.size + 1, parts = layout.parts[l];
+        const double* kr0 = bank.re[(size_t) kid].data() + layout.base[l];
+        const double* ki0 = bank.im[(size_t) kid].data() + layout.base[l];
+        const double* xr0 = v.fdlRe[(size_t) src].data();
+        const double* xi0 = v.fdlIm[(size_t) src].data();
+        for (int q = 0; q < parts; ++q)
+        {
+            int slot = v.head - q;
+            if (slot < 0) slot += parts;
+            const double* a = kr0 + q * bins; const double* b = ki0 + q * bins;
+            const double* c = xr0 + slot * bins; const double* d = xi0 + slot * bins;
+            for (int k = 0; k < bins; ++k)
+            {
+                yr[k] += a[k] * c[k] - b[k] * d[k];
+                yi[k] += a[k] * d[k] + b[k] * c[k];
             }
         }
     }
 
-    // Espectro acumulado (bins 0 … PART) → últimas PART muestras de la IFFT (overlap-save)
-    void synth (std::vector<double>& y)
+    // Salida de un nivel (B muestras por canal) con un filtro: en estéreo las dos salidas reales
+    // salen de una sola IFFT (W = Y0 + i·Y1 → y0 + i·y1).
+    void levelOutput (const KernelBank& bank, int l, int nc, std::array<std::vector<double>, 2>& y)
     {
-        for (int k = 1; k < PART; ++k) { accRe[(size_t) (PART_FFT - k)] = accRe[(size_t) k]; accIm[(size_t) (PART_FFT - k)] = -accIm[(size_t) k]; }
-        for (int k = 0; k < PART_FFT; ++k) accIm[(size_t) k] = -accIm[(size_t) k];   // ifft = conj(fft(conj(Y))) / n
-        fftPart.forward (accRe.data(), accIm.data());
-        const double inv = 1.0 / PART_FFT;
-        for (int j = 0; j < PART; ++j) y[(size_t) j] = accRe[(size_t) (PART + j)] * inv;
-    }
-
-    void outputFor (const KernelBank& bank, int nc, std::array<std::vector<double>, 2>& y)
-    {
+        Level& v = lv[(size_t) l];
+        const int b = v.size, n2 = 2 * b, bins = b + 1;
+        std::fill (v.y0Re.begin(), v.y0Re.end(), 0.0); std::fill (v.y0Im.begin(), v.y0Im.end(), 0.0);
+        std::fill (v.y1Re.begin(), v.y1Re.end(), 0.0); std::fill (v.y1Im.begin(), v.y1Im.end(), 0.0);
+        double* wr = v.workRe.data(); double* wi = v.workIm.data();
+        const double inv = 1.0 / n2;
         if (nc == 2)
         {
-            accumulate (bank, KernelBank::KA, 0, KernelBank::KB, 1); synth (y[0]);
-            accumulate (bank, KernelBank::KC, 0, KernelBank::KD, 1); synth (y[1]);
+            mac (bank, l, KernelBank::KA, 0, v.y0Re.data(), v.y0Im.data());
+            mac (bank, l, KernelBank::KB, 1, v.y0Re.data(), v.y0Im.data());
+            mac (bank, l, KernelBank::KC, 0, v.y1Re.data(), v.y1Im.data());
+            mac (bank, l, KernelBank::KD, 1, v.y1Re.data(), v.y1Im.data());
+            for (int k = 0; k < bins; ++k)       // conj(W[k]), W[k] = Y0[k] + i·Y1[k]
+            {
+                wr[k] = v.y0Re[(size_t) k] - v.y1Im[(size_t) k];
+                wi[k] = -(v.y0Im[(size_t) k] + v.y1Re[(size_t) k]);
+            }
+            for (int k = 1; k < b; ++k)          // conj(W[n−k]), W[n−k] = conj(Y0[k]) + i·conj(Y1[k])
+            {
+                wr[n2 - k] = v.y0Re[(size_t) k] + v.y1Im[(size_t) k];
+                wi[n2 - k] = v.y0Im[(size_t) k] - v.y1Re[(size_t) k];
+            }
+            v.fft->forward (wr, wi);            // ifft(W) = conj(fft(conj W)) / n
+            for (int j = 0; j < b; ++j) { y[0][(size_t) j] = wr[b + j] * inv; y[1][(size_t) j] = -wi[b + j] * inv; }
         }
         else
         {
-            accumulate (bank, KernelBank::KH, 0, -1, -1); synth (y[0]);
+            mac (bank, l, KernelBank::KH, 0, v.y0Re.data(), v.y0Im.data());
+            for (int k = 0; k < bins; ++k) { wr[k] = v.y0Re[(size_t) k]; wi[k] = -v.y0Im[(size_t) k]; }
+            for (int k = 1; k < b; ++k) { wr[n2 - k] = v.y0Re[(size_t) k]; wi[n2 - k] = v.y0Im[(size_t) k]; }
+            v.fft->forward (wr, wi);
+            for (int j = 0; j < b; ++j) y[0][(size_t) j] = wr[b + j] * inv;
         }
     }
 
     void processPartBlock (int nc)
     {
-        const KernelBank& bank = banks[(size_t) cur];
-        const int parts = bank.parts;
-        fdlHead = (fdlHead + 1) % parts;
-
-        // Trama de 2·PART (bloque anterior + actual) → FFT → línea de retardo en frecuencia
-        for (int c = 0; c < nc; ++c)
+        // 1. El bloque de 256 recién llegado pasa a las tramas de los niveles mayores y a la FFT del nivel 0
+        for (int l = 1; l < layout.levels; ++l)
         {
-            double* f = frame[(size_t) c].data();
-            for (int j = 0; j < PART_FFT; ++j) { accRe[(size_t) j] = f[j]; accIm[(size_t) j] = 0.0; }
-            fftPart.forward (accRe.data(), accIm.data());
-            double* xr = fdlRe[(size_t) c].data() + fdlHead * PART_BINS;
-            double* xi = fdlIm[(size_t) c].data() + fdlHead * PART_BINS;
-            for (int k = 0; k < PART_BINS; ++k) { xr[k] = accRe[(size_t) k]; xi[k] = accIm[(size_t) k]; }
-            std::memmove (f, f + PART, sizeof (double) * PART);   // el bloque actual pasa a ser el anterior
+            Level& v = lv[(size_t) l];
+            for (int c = 0; c < nc; ++c)
+                std::memcpy (v.frame[(size_t) c].data() + v.size + v.fill, lv[0].frame[(size_t) c].data() + PART, sizeof (double) * PART);
+            v.fill += PART;
         }
+        pushFrame (lv[0], layout.parts[0], nc);
 
-        outputFor (bank, nc, yNew);
-        if (fadePos < FADE_LEN && prev >= 0)
+        // 2. Salida de este bloque: nivel 0 + el trozo que toca de las colas de los demás niveles
+        auto blockFor = [&] (const KernelBank& bank, bool useCur, std::array<std::vector<double>, 2>& y) {
+            levelOutput (bank, 0, nc, y);
+            for (int l = 1; l < layout.levels; ++l)
+            {
+                const Level& v = lv[(size_t) l];
+                const int at = v.fill - PART;
+                const auto& t = useCur ? v.tailCur : v.tailPrev;
+                for (int c = 0; c < nc; ++c)
+                    for (int j = 0; j < PART; ++j) y[(size_t) c][(size_t) j] += t[(size_t) c][(size_t) (at + j)];
+            }
+        };
+        const bool fading = fadePos < FADE_LEN && prev >= 0;
+        blockFor (banks[(size_t) cur], true, yNew);
+        if (fading)
         {
-            outputFor (banks[(size_t) prev], nc, yOld);
+            blockFor (banks[(size_t) prev], false, yOld);
             for (int j = 0; j < PART; ++j)
             {
                 const double w = std::min (1.0, (double) (fadePos + j + 1) / FADE_LEN);
@@ -732,22 +916,33 @@ private:
         {
             for (int c = 0; c < nc; ++c) std::memcpy (outBlk[(size_t) c].data(), yNew[(size_t) c].data(), sizeof (double) * PART);
         }
+
+        // 3. Niveles cuyo bloque grande se ha completado: FFT y cola del bloque grande siguiente
+        for (int l = 1; l < layout.levels; ++l)
+        {
+            Level& v = lv[(size_t) l];
+            if (v.fill < v.size) continue;
+            v.fill = 0;
+            pushFrame (v, layout.parts[l], nc);
+            levelOutput (banks[(size_t) cur], l, nc, v.tailCur);
+            if (prev >= 0) levelOutput (banks[(size_t) prev], l, nc, v.tailPrev);
+        }
     }
 
     Params p;
+    Layout layout;
     double sr = 48000;
     int idx = 0;
-    Fft fftPart;
     KernelBuilder syncBuilder;
     std::array<KernelBank, NUM_SLOTS> banks;
     std::array<std::atomic<int>, NUM_SLOTS> slotState;
     std::atomic<int> latest { -1 };
     std::atomic<int> ncForBuilder { 0 };
     std::atomic<double> srForBuilder { 48000 };
-    int cur = -1, prev = -1, fadePos = FADE_LEN, fdlHead = 0;
+    int cur = -1, prev = -1, fadePos = FADE_LEN;
     bool async = false;
-    std::array<std::vector<double>, 2> fdlRe, fdlIm, frame, outBlk, yNew, yOld;
-    std::vector<double> accRe, accIm;
+    std::array<Level, MAX_LEVELS> lv;
+    std::array<std::vector<double>, 2> outBlk, yNew, yOld;
     std::atomic<int> kernelEpoch { 0 };   // sube cada vez que los filtros anteriores dejan de valer
     // Solo los usa el hilo que llama a buildPending
     Params lastBuilt;

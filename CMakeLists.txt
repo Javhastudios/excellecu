@@ -69,6 +69,12 @@ target_compile_definitions(Excellecu PUBLIC
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0)
 
+# macOS: FFT de Accelerate en el motor (ver EqEngine.h)
+if(APPLE)
+    target_compile_definitions(Excellecu PRIVATE EX_USE_ACCELERATE=1)
+    target_link_libraries(Excellecu PRIVATE "-framework Accelerate")
+endif()
+
 target_link_libraries(Excellecu
     PRIVATE
         juce::juce_audio_utils

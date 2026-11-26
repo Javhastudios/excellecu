@@ -43,6 +43,22 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
   En el plugin, `theme::font` suma 2 px y usa la letra sin serifa del sistema; botones y chips
   algo más anchos.
 
+- **Menos CPU en el motor (mismo sonido, misma latencia):**
+  1. L y R comparten una FFT compleja a la ida y otra a la vuelta (L real, R imaginaria): la mitad
+     de FFT.
+  2. Convolución particionada no uniforme: 4 trozos de 256 al principio del filtro y trozos de
+     1024 desde el tap 1024 (cada uno empieza en su propio tamaño, así la cola se calcula cada 1024
+     muestras sin latencia extra). Probados también 256+512, 256+2048 y 256+1024+4096: peor.
+  3. FFT radix 4 con tablas contiguas por etapa (vectoriza con clang); en macOS, FFT de Accelerate
+     (`vDSP_fft_zipD`, `EX_USE_ACCELERATE` solo en el plugin de Mac).
+  Resultado en esta máquina (Linux, clang -O3, FFT portable): con la TDM, de ~10,8 a ~5,7 ms por
+  segundo de audio; contando instrucciones en marcha, −46 % con la TDM y −40 % con solo bandas en
+  Estéreo. Salida idéntica al motor anterior: `tests/engine_ref.cpp` (estéreo y mono, filtros de
+  512 a 8192, fundidos, solo, bloques aleatorios) da 1,4e-14 de diferencia máxima; la comparación
+  con la web sigue exacta. Medidor propio: `tests/bench_engine.cpp`. Accelerate no se puede
+  ejecutar aquí: GitHub Actions lo compara con la FFT portable en el Mac (`tests/fft_check.cpp` y
+  `engine_ref`) y mide las dos. Pendiente de medir en Plugin Doctor.
+
 ## v0.23 (26/11/2026): puntos hasta 30 kHz y escuchar banda
 
 - **Frecuencia de 20 Hz a 30 kHz** (antes 20 kHz), como el Pro-Q, para definir mejor la curva en
