@@ -44,9 +44,21 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
     analógica con su Q y solo se recorta la resonancia que no toca: en «Base», el lado del cénit
     llega a la ganancia y no la pasa; en «Cénit», el lado de la base llega a 0 dB y no lo cruza.
     Decidido: las resonancias empiezan en Q 0,707, como en el analógico estándar (la Q de
-    Excellecu equivale a la de otros EQ). Modo Base aprobado. Pendiente: afinar el cénit.
+    Excellecu equivale a la de otros EQ). Modo Base aprobado.
+    **Codo (web v0.30, a petición de Javier):** con Q alta la curva llega a su línea muy
+    empinada (−20 a −45 dB/oct con Q 2–4, a 0,06–0,26 oct de fc) y el recorte deja una esquina.
+    Selector «Codo» en «Base» y «Cénit» (panel y clic derecho; preset `b{n}_knee`):
+    0 **Recorte** (lo de la v0.29, por defecto), 1 **Suave** (codo de 1/6 de octava centrado
+    donde la curva toca la línea, por fuera: pasado ese punto la curva sigue su tangente y se
+    dobla hasta la línea; ancho del codo en dB = pendiente × 1/12 oct, como mucho la mitad de la
+    ganancia, así fc no cambia) y 2 **Más suave** (ese lado es el shelf de Q 0,707 comprimido
+    en frecuencia, f' = fc·(f/fc)^a con a = (A²+1)/((A−1)²+A/Q²), que da en fc la misma
+    pendiente que la Q elegida; sin esquina ni valle). La curva toca la línea en
+    w² = (A²+1)/(A(2−1/Q²)) desde fc (igual en «Base» y «Cénit»). Comprobado: fc a media
+    ganancia, nunca cruza la línea, high shelf = espejo del low; salto de pendiente en el codo
+    15–26 dB/oct con Recorte y < 1 con Suave y Más suave (Q 2–4).
     Referencias del mercado: Steinberg StudioEQ (Shelf I/II/III) y DMG EQuilibrium.
-  - Al pasarlo al plugin: parámetro de forma por banda (y en `Params`/`bandGainAt` del motor C++,
+  - Al pasarlo al plugin: parámetros de forma, resonancia y codo por banda (y en `Params`/`bandGainAt` del motor C++,
     igual que la web para la comparación), selector y menú, y etiquetas editables con doble clic.
 
 ## v0.25 (26/11/2026): bypass alineado, menos CPU, letra legible y analizador en la web
