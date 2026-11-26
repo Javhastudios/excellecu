@@ -485,7 +485,7 @@ int main (int argc, char** argv)
         for (auto* prm : p.getParameters())
         {
             const auto id = dynamic_cast<RangedAudioParameter*> (prm)->getParameterID();
-            if (id.startsWithChar ('b') && plain (p, ids::band (id.substring (1).getIntValue() - 1, "used")) < 0.5f) continue;
+            if (presets::isBandParam (id) && plain (p, ids::band (presets::bandOf (id), "used")) < 0.5f) continue;
             same = same && std::abs (plain (p, id) - plain (q, id)) < 1e-3f * std::max (1.0f, std::abs (plain (p, id)));
         }
         check (same, "el preset carga igual en otra instancia (bandas, M/S y salida)");
@@ -653,6 +653,101 @@ int main (int argc, char** argv)
         }
         const float sineStep = (float) (0.25 * 2 * eq::PI * 1000 / SR) * 2.0f;   // la curva a 1 kHz llega a +6 dB
         check (maxStep <= sineStep * 1.05f, "activar el solo en tiempo real sin saltos (paso máx. " + String (maxStep, 4) + ")");
+    }
+
+
+    {
+        std::cout << "Bypass" << std::endl;
+        ExcellecuProcessor p;
+        p.prepareToPlay (SR, 480);
+        ui::BandModel m (p);
+        m.create (eq::Bell, 1000, 6);
+        m.create (eq::HighPass, 80, 0);
+        check (p.getBypassParameter() != nullptr && p.getBypassParameter() == p.apvts.getParameter ("bypass"),
+               "el plugin ofrece su propio bypass al DAW");
+        const int L = p.getLatencySamples();
+        auto in = [] (int i, int c) { return (float) (0.3 * std::sin (2 * eq::PI * 997 * i / 48000.0 + c) + 0.2 * std::sin (2 * eq::PI * 60 * i / 48000.0)); };
+        setPlain (p, "bypass", 1.0f);
+        auto o = run (p, 30000, in);
+        double worst = 0;
+        for (int i = L; i < 30000; ++i) for (int c = 0; c < 2; ++c) worst = std::max (worst, (double) std::abs (o[(size_t) c][(size_t) i] - in (i - L, c)));
+        check (worst < 1e-6, "puenteado: sale la entrada con el mismo retraso que el procesado (dif. " + String (worst, 9) + ")");
+        // processBlockBypassed (lo usan algunos formatos): igual
+        {
+            ExcellecuProcessor q;
+            q.prepareToPlay (SR, 480);
+            AudioBuffer<float> b (2, 480);
+            MidiBuffer mid;
+            std::vector<float> outL;
+            for (int blk = 0; blk < 40; ++blk)
+            {
+                for (int i = 0; i < 480; ++i) for (int c = 0; c < 2; ++c) b.setSample (c, i, in (blk * 480 + i, c));
+                q.processBlockBypassed (b, mid);
+                for (int i = 0; i < 480; ++i) outL.push_back (b.getSample (0, i));
+            }
+            double w2 = 0;
+            for (int i = L + 2000; i < (int) outL.size(); ++i) w2 = std::max (w2, (double) std::abs (outL[(size_t) i] - in (i - L, 0)));
+            check (w2 < 1e-6, "processBlockBypassed: entrada con el retraso del procesado");
+        }
+        // Bloques mayores que los anunciados
+        {
+            ExcellecuProcessor q;
+            q.prepareToPlay (SR, 256);
+            setPlain (q, "bypass", 1.0f);
+            AudioBuffer<float> b (2, 10000);
+            MidiBuffer mid;
+            for (int i = 0; i < 10000; ++i) for (int c = 0; c < 2; ++c) b.setSample (c, i, in (i, c));
+            q.processBlock (b, mid);
+            double w3 = 0;
+            for (int i = L; i < 10000; ++i) w3 = std::max (w3, (double) std::abs (b.getSample (0, i) - in (i - L, 0)));
+            check (w3 < 1e-6, "bloque de 10000 muestras con búfer anunciado de 256: retraso correcto");
+        }
+        // Sin bandas, procesado y puenteado son la misma señal: alternar no cambia nada
+        {
+            ExcellecuProcessor q;
+            q.prepareToPlay (SR, 480);
+            q.setNonRealtime (false);
+            AudioBuffer<float> b (2, 480);
+            MidiBuffer mid;
+            double w4 = 0;
+            for (int blk = 0; blk < 200; ++blk)
+            {
+                if (blk % 20 == 10) setPlain (q, "bypass", (blk / 20) % 2 == 0 ? 1.0f : 0.0f);
+                for (int i = 0; i < 480; ++i) for (int c = 0; c < 2; ++c) b.setSample (c, i, in (blk * 480 + i, c));
+                q.processBlock (b, mid);
+                for (int i = 0; i < 480; ++i) { const int t = blk * 480 + i; if (t >= L) w4 = std::max (w4, (double) std::abs (b.getSample (0, i) - in (t - L, 0))); }
+            }
+            check (w4 < 1e-5, "EQ plano: activar y quitar el bypass no cambia la señal (dif. " + String (w4, 7) + ")");
+        }
+        // Con EQ, el cambio es un fundido, sin saltos
+        setPlain (p, "bypass", 0.0f);
+        p.setNonRealtime (false);
+        {
+            AudioBuffer<float> b (2, 480);
+            MidiBuffer mid;
+            float last = 0, maxStep = 0;
+            const float sineStep = (float) (0.25 * 2 * eq::PI * 1000 / SR) * 2.0f;
+            for (int blk = 0; blk < 200; ++blk)
+            {
+                if (blk == 100) setPlain (p, "bypass", 1.0f);
+                if (blk == 150) setPlain (p, "bypass", 0.0f);
+                for (int i = 0; i < 480; ++i) for (int c = 0; c < 2; ++c) b.setSample (c, i, sine (1000) (blk * 480 + i, c));
+                p.processBlock (b, mid);
+                for (int i = 0; i < 480; ++i) { if (blk > 80) maxStep = std::max (maxStep, std::abs (b.getSample (0, i) - last)); last = b.getSample (0, i); }
+            }
+            check (maxStep <= sineStep * 1.05f, "con EQ, entrar y salir del bypass sin saltos (paso máx. " + String (maxStep, 4) + ")");
+        }
+        // El bypass no es parte de un preset ni lo cambia cargarlo
+        setPlain (p, "bypass", 1.0f);
+        auto xml = presets::capture (p, "X");
+        check (xml->getChildByAttribute ("id", "bypass") == nullptr, "el preset no guarda el bypass");
+        std::vector<float> vals; int fresh = 0;
+        auto flat = presets::factoryXml (presets::factoryList()[0]);
+        presets::decode (p, *flat, vals, fresh);
+        p.applyPreset (vals, fresh, "Plano");
+        check (p.getBypassParameter()->getValue() > 0.5f && ! p.presetModified(), "cargar un preset no quita el bypass");
+        setPlain (p, "bypass", 0.0f);
+        check (! p.presetModified(), "el bypass no marca el preset como modificado");
     }
 
     {

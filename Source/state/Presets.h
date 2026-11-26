@@ -73,6 +73,7 @@ inline std::unique_ptr<juce::XmlElement> capture (ExcellecuProcessor& p, const j
         auto* r = dynamic_cast<juce::RangedAudioParameter*> (prm);
         if (r == nullptr) continue;
         const auto id = r->getParameterID();
+        if (id == "bypass") continue;   // el bypass no es parte del sonido guardado
         if (isBandParam (id))
         {
             const int b = bandOf (id);

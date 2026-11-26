@@ -55,6 +55,7 @@ AudioProcessorValueTreeState::ParameterLayout createLayout()
 
     // Salida: ganancia de L y R, luego de Mid y Side. Las cuatro actúan siempre; el modo solo
     // elige qué pareja se ve y se edita, así cambiar de modo no altera lo que suena.
+    p.push_back (std::make_unique<AudioParameterBool> (ParameterID { "bypass", 1 }, "Bypass", false));
     p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { "out_mode", 1 }, "Salida modo", StringArray { "L/R", "M/S" }, 0));
     p.push_back (std::make_unique<AudioParameterBool> (ParameterID { "out_link", 1 }, "Salida enlazar", true));
     const char* outNames[] = { "Salida L", "Salida R", "Salida Mid", "Salida Side" };
@@ -105,6 +106,7 @@ ExcellecuProcessor::ExcellecuProcessor()
     history.setSelectionAccess ([this] { return selected; }, [this] (int s) { selected = s; });
     const char* outIds[] = { "out_l", "out_r", "out_m", "out_s" };
     for (int i = 0; i < 4; ++i) outPtr[i] = apvts.getRawParameterValue (outIds[i]);
+    bypassParam = dynamic_cast<AudioParameterBool*> (apvts.getParameter ("bypass"));
 
     for (int b = 0; b < eq::MAX_BANDS; ++b)
     {
@@ -164,7 +166,7 @@ ExcellecuProcessor::~ExcellecuProcessor()
     kernelThread.stopThread (2000);
 }
 
-void ExcellecuProcessor::prepareToPlay (double sampleRate, int)
+void ExcellecuProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     kernelThread.stopThread (2000);   // nada calcula filtros mientras se prepara el motor
     lastSampleRate = sampleRate;
@@ -178,6 +180,13 @@ void ExcellecuProcessor::prepareToPlay (double sampleRate, int)
         outSmooth[(size_t) i].reset (sampleRate, 0.05);   // 50 ms: sin clics al mover la ganancia
         outSmooth[(size_t) i].setCurrentAndTargetValue (Decibels::decibelsToGain (outPtr[i]->load()));
     }
+    // Bypass: retraso del audio puenteado = latencia del motor; fundido de 30 ms
+    dryLen = engine.latency();
+    dryPos = 0;
+    for (auto& r : dryRing) r.assign ((size_t) jmax (1, dryLen), 0.0f);
+    for (auto& d : dryScratch) d.assign ((size_t) jmax (samplesPerBlock, 4096), 0.0f);
+    bypassMix.reset (sampleRate, 0.03);
+    bypassMix.setCurrentAndTargetValue (bypassParam->get() ? 1.0f : 0.0f);
     kernelThread.startThread();
 }
 
@@ -197,17 +206,78 @@ void ExcellecuProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
 {
     ScopedNoDenormals noDenormals;
     for (int c = getTotalNumInputChannels(); c < buffer.getNumChannels(); ++c) buffer.clear (c, 0, buffer.getNumSamples());
+    const int nc = jmin (2, buffer.getNumChannels()), ns = buffer.getNumSamples();
+    // Por trozos del tamaño del búfer de retraso (un DAW puede mandar bloques más grandes que los anunciados)
+    const int chunk = dryScratch[0].empty() ? ns : (int) dryScratch[0].size();   // sin preparar: de una vez
+    for (int start = 0; start < ns; start += chunk)
+    {
+        float* ptrs[2] = { buffer.getWritePointer (0, start), nc > 1 ? buffer.getWritePointer (1, start) : nullptr };
+        processChunk (ptrs, nc, jmin (chunk, ns - start), false);
+    }
+}
+
+// Algunos formatos piden el bypass del DAW en lugar del parámetro: mismo camino, puenteado
+void ExcellecuProcessor::processBlockBypassed (AudioBuffer<float>& buffer, MidiBuffer&)
+{
+    ScopedNoDenormals noDenormals;
+    for (int c = getTotalNumInputChannels(); c < buffer.getNumChannels(); ++c) buffer.clear (c, 0, buffer.getNumSamples());
+    const int nc = jmin (2, buffer.getNumChannels()), ns = buffer.getNumSamples();
+    const int chunk = dryScratch[0].empty() ? ns : (int) dryScratch[0].size();
+    for (int start = 0; start < ns; start += chunk)
+    {
+        float* ptrs[2] = { buffer.getWritePointer (0, start), nc > 1 ? buffer.getWritePointer (1, start) : nullptr };
+        processChunk (ptrs, nc, jmin (chunk, ns - start), true);
+    }
+}
+
+void ExcellecuProcessor::processChunk (float* const* ch, int nc, int ns, bool forceBypass)
+{
     engine.setParams (currentParams());
     // En tiempo real los filtros nuevos llegan del otro hilo; en un render sin tiempo real se
     // calculan aquí mismo, para que el resultado no dependa de la velocidad del render.
     engine.setAsyncKernels (! isNonRealtime() && kernelThread.isThreadRunning());
     wantedLatency = engine.latency();
-    const int nc = jmin (2, buffer.getNumChannels()), ns = buffer.getNumSamples();
     meterChannels.store (nc, std::memory_order_relaxed);
-    for (int c = 0; c < nc; ++c) inMeter[(size_t) c].add (buffer.getReadPointer (c), ns);
-    engine.process (buffer.getArrayOfWritePointers(), nc, ns);
-    applyOutputGain (buffer.getArrayOfWritePointers(), nc, ns);
-    for (int c = 0; c < nc; ++c) outMeter[(size_t) c].add (buffer.getReadPointer (c), ns);
+    for (int c = 0; c < nc; ++c) inMeter[(size_t) c].add (ch[c], ns);
+
+    // Copia retrasada de la entrada (para el bypass), antes de que el motor la sobrescriba
+    const bool haveDry = dryLen > 0 && (int) dryScratch[0].size() >= ns;   // falso solo sin preparar
+    if (haveDry)
+    {
+        for (int c = 0; c < nc; ++c)
+        {
+            float* ring = dryRing[(size_t) c].data();
+            float* out = dryScratch[(size_t) c].data();
+            int pos = dryPos;
+            for (int i = 0; i < ns; ++i)
+            {
+                out[i] = ring[pos];
+                ring[pos] = ch[c][i];
+                if (++pos == dryLen) pos = 0;
+            }
+        }
+        dryPos = (dryPos + ns) % dryLen;
+    }
+
+    engine.process (ch, nc, ns);
+    applyOutputGain (ch, nc, ns);
+
+    // Fundido entre procesado y puenteado
+    bypassMix.setTargetValue (forceBypass || bypassParam->get() ? 1.0f : 0.0f);
+    if (! haveDry) {}
+    else if (bypassMix.isSmoothing())
+    {
+        for (int i = 0; i < ns; ++i)
+        {
+            const float g = bypassMix.getNextValue();
+            for (int c = 0; c < nc; ++c) ch[c][i] += g * (dryScratch[(size_t) c][(size_t) i] - ch[c][i]);
+        }
+    }
+    else if (bypassMix.getTargetValue() > 0.5f)
+    {
+        for (int c = 0; c < nc; ++c) std::copy (dryScratch[(size_t) c].data(), dryScratch[(size_t) c].data() + ns, ch[c]);
+    }
+    for (int c = 0; c < nc; ++c) outMeter[(size_t) c].add (ch[c], ns);
 }
 
 void ExcellecuProcessor::applyOutputGain (float* const* ch, int numCh, int numSamples)
@@ -299,7 +369,7 @@ void ExcellecuProcessor::applyPreset (const std::vector<float>& values, int lrFr
     for (int i = 0; i < params.size() && i < (int) values.size(); ++i)
     {
         auto* prm = params[i];
-        if (prm->getValue() == values[(size_t) i]) continue;
+        if (prm == bypassParam || prm->getValue() == values[(size_t) i]) continue;   // el bypass no es del preset
         prm->beginChangeGesture();
         prm->setValueNotifyingHost (values[(size_t) i]);
         prm->endChangeGesture();
@@ -323,13 +393,14 @@ bool ExcellecuProcessor::presetModified() const
     if (presetValues.size() != (size_t) params.size()) return false;
     for (int i = 0; i < params.size(); ++i)
     {
+        if (params[i] == bypassParam) continue;
         // Las bandas que no existen no cuentan (sus valores no suenan)
         if (std::abs (params[i]->getValue() - presetValues[(size_t) i]) > 1e-5f)
         {
             if (auto* r = dynamic_cast<RangedAudioParameter*> (params[i]))
             {
                 const auto id = r->getParameterID();
-                if (id.startsWithChar ('b') && ! id.endsWith ("_used"))
+                if (id.startsWithChar ('b') && id.containsChar ('_') && ! id.endsWith ("_used"))
                 {
                     const int b = id.substring (1).getIntValue() - 1;
                     if (apvts.getRawParameterValue (ids::band (b, "used"))->load() < 0.5f) continue;

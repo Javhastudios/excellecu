@@ -12,6 +12,20 @@ Original: `web/eq-dft-proto.html` (ahora v0.21). Objetivo: medirlo en Plugin Doc
 iterando. **Acuerdo (26/11/2026): cada avance del plugin se hace también en el HTML**, que Javier
 guarda como archivo; el HTML conserva además los motores Clásico, la ventana y el overlap.
 
+## En la rama `trabajo` (sin compilar en GitHub Actions todavía)
+
+- **Bypass sin desalinear:** parámetro propio `bypass` que el plugin ofrece al DAW
+  (`getBypassParameter`), así el DAW llama a `processBlock` y el plugin decide. Puenteado, la
+  entrada sale por un retraso igual a la latencia del motor (4352 muestras): antes, con el bypass
+  del DAW, el audio salía sin retraso y saltaba ~90 ms respecto al resto de la mezcla. Fundido de
+  30 ms al entrar y salir; el motor sigue trabajando puenteado para que la vuelta sea limpia (la
+  CPU no baja al puentear). `processBlockBypassed` hace lo mismo para los formatos que lo usen.
+  Procesa por trozos si el DAW manda bloques mayores que los anunciados. El bypass no se guarda en
+  los presets, cargar uno no lo quita y no cuenta como "modificado".
+- Pruebas de humo: retraso exacto puenteado (dif. 0), `processBlockBypassed`, bloques grandes, EQ
+  plano sin diferencia al alternar, con EQ sin saltos, presets. Pendiente de pluginval en GitHub
+  Actions con la próxima compilación.
+
 ## v0.23 (26/11/2026): puntos hasta 30 kHz y escuchar banda
 
 - **Frecuencia de 20 Hz a 30 kHz** (antes 20 kHz), como el Pro-Q, para definir mejor la curva en
