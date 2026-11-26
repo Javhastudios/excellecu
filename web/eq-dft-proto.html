@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EQ Motor DFT — Prototipo v0.28</title>
+<title>EQ Motor DFT — Prototipo v0.29</title>
 <style>
   :root {
     --bg: #0e0e10;
@@ -283,7 +283,7 @@
 </head>
 <body>
 
-<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.28</h1>
+<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.29</h1>
 
 <div class="modules">
 
@@ -688,21 +688,24 @@ function classicHighShelfAt(f, fc, gainDb, Q) {
 }
 const SHAPES = { tdm: 'TDM', classic: 'Classic' };
 
-// Resonancia de los shelves Classic (v0.28): con Q > 0,707 un shelf analógico tiene dos
-// resonancias, una en la base (lado sin tocar) y otra en el cénit (lado realzado o atenuado).
-// Se calcula la diferencia entre el shelf con su Q y el mismo sin resonancias (Q = 1/√2): esa
-// diferencia son las dos resonancias, y cambian de lado justo en fc (allí los dos shelves valen
-// la mitad de la ganancia). 'both' = analógico tal cual; 'base' / 'top' = solo la de ese lado.
+// Resonancia de los shelves Classic (v0.28, afinada en v0.29): con Q > 0,707 un shelf analógico
+// tiene dos resonancias, una en la base (lado sin tocar) y otra en el cénit (lado realzado o
+// atenuado). Los dos lados siguen la curva analógica con su Q (la transición se inclina igual
+// a ambos lados de fc al subir la Q); en el modo elegido solo se recorta la resonancia que no
+// toca, para que no cruce su línea:
+//   'base' → el lado del cénit llega a la ganancia del shelf y no la pasa;
+//   'top'  → el lado de la base llega a 0 dB y no lo cruza.
+// 'both' = analógico tal cual. Con Q ≤ 0,707 no hay resonancias y los tres modos coinciden.
 const SHELF_RES = { both: 'Las dos', base: 'Base', top: 'Cénit' };
 function classicShelfWithRes(type, f, fc, gainDb, Q, res) {
   const fn = type === 'ls' ? classicLowShelfAt : classicHighShelfAt;
   const full = fn(f, fc, gainDb, Q);
-  if (!res || res === 'both' || Q <= Math.SQRT1_2 || gainDb === 0 || f < 1) return full;
-  const plain = fn(f, fc, gainDb, Math.SQRT1_2);
-  // Lado de la base: por encima de fc en el low shelf, por debajo en el high shelf
-  const onBase = type === 'ls' ? f > fc : f < fc;
-  const keep = res === 'base' ? onBase : !onBase;
-  return keep ? full : plain;
+  if (!res || res === 'both' || gainDb === 0 || f < 1) return full;
+  const g = Math.pow(10, gainDb / 20), up = gainDb > 0;
+  // Lado del cénit: por debajo de fc en el low shelf, por encima en el high shelf
+  const onTop = type === 'ls' ? f < fc : f > fc;
+  if (res === 'base') return onTop ? (up ? Math.min(full, g) : Math.max(full, g)) : full;
+  return onTop ? full : (up ? Math.max(full, 1) : Math.min(full, 1));
 }
 
 // ── Modos de canal ───────────────────────────────────────────────────
@@ -2754,7 +2757,7 @@ function presetXml(name, st) {
   const o = st.out;
   body += P('out_mode', o.mode === 'ms' ? 1 : 0) + P('out_link', o.link === false ? 0 : 1)
         + P('out_l', o.l) + P('out_r', o.r) + P('out_m', o.m) + P('out_s', o.s);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.28" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.29" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
 }
 
 // XML → estado. Lo que falta toma el valor por defecto del plugin; lo desconocido se ignora.

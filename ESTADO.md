@@ -39,6 +39,12 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
     mitad de la ganancia, así que la curva es continua; solo hay un quiebro de pendiente). Con
     Q ≤ 0,707 los tres modos coinciden. Selector en el panel (solo shelves Classic) y en el clic
     derecho; preset `b{n}_res` (0 las dos, 1 base, 2 cénit). Para qué sirve: en el documento.
+    **Afinado (web v0.29, a petición de Javier):** antes el lado sin resonancia se quedaba con la
+    curva de Q 0,707 y no seguía a la Q (escalón en fc). Ahora los dos lados siguen la curva
+    analógica con su Q y solo se recorta la resonancia que no toca: en «Base», el lado del cénit
+    llega a la ganancia y no la pasa; en «Cénit», el lado de la base llega a 0 dB y no lo cruza.
+    Pendiente de ver el cénit con Javier y de decidir si las resonancias empiezan en Q 0,60
+    (ahora, como en el analógico, en 0,707).
   - Al pasarlo al plugin: parámetro de forma por banda (y en `Params`/`bandGainAt` del motor C++,
     igual que la web para la comparación), selector y menú, y etiquetas editables con doble clic.
 
