@@ -58,6 +58,11 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
   con la web sigue exacta. Medidor propio: `tests/bench_engine.cpp`. Accelerate no se puede
   ejecutar aquí: GitHub Actions lo compara con la FFT portable en el Mac (`tests/fft_check.cpp` y
   `engine_ref`) y mide las dos. Pendiente de medir en Plugin Doctor.
+- GitHub Actions en macOS (26/11): Accelerate frente a la FFT portable, salida del motor
+  idéntica (1,4e-20 de diferencia máxima); CPU en el ejecutor de Mac, TDM: portable 4,77 ms y
+  Accelerate 3,72 ms por segundo de audio (solo Estéreo: 3,64 y 2,58). La primera compilación
+  falló en macOS porque la cabecera de Accelerate choca con `juce::Component`: va aislada en
+  `Source/dsp/FftAccelerate.cpp`.
 - Versión: plugin 0.25.0, igual que la web (la web v0.24 fue el analizador; el plugin salta de
   0.23 a 0.25). El analizador sigue solo en la web.
 
