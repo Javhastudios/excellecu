@@ -154,6 +154,13 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
 
 ## Pendiente / ideas
 
+- **v0.22 (acordado el 26/11/2026):** quitar la gráfica de fase ("fase lineal ✓" en la barra de
+  estado); gráfica de magnitud a todo lo ancho y el doble de alta; debajo, banda (deslizadores en
+  fila) y salida una al lado de la otra; chips de bandas en la cabecera de la gráfica; medidores a
+  la derecha con selector RMS AES-17 / sin ponderar (por defecto AES-17). En plugin y web.
+  Por decidir: fase plegada como diagnóstico en la web; zoom vertical ±3/±6/±12 dB.
+- Confirmar el canal de la banda 3 de la TDM (Side o Mid).
+
 - EQ: codo suave en HPF/LPF; high shelf cerca de Nyquist (−0,3 dB a 20 kHz frente a la TDM del
   Pro-Q); filtro de 16 384 a 88,2/96 kHz; modo de fase mínima opcional.
 - Beta: true peak / LUFS y vista M/S en los medidores; ranuras A/B; inversor de polaridad.
