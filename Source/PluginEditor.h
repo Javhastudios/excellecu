@@ -53,7 +53,7 @@ private:
     juce::ToggleButton onToggle { "Activa" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAtt;
     juce::OwnedArray<MsButton> typeButtons, keyButtons;
-    MsButton deleteButton { "Eliminar banda" };
+    MsButton deleteButton { "Eliminar banda" }, soloButton { "Escuchar" };
     Row fc, gain, q, slope;
     int boundSlot = -2, boundKey = -1, boundType = -1;
     bool hasBand = false;

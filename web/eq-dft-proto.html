@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EQ Motor DFT — Prototipo v0.22</title>
+<title>EQ Motor DFT — Prototipo v0.23</title>
 <style>
   :root {
     --bg: #0e0e10;
@@ -275,7 +275,7 @@
 </head>
 <body>
 
-<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.22</h1>
+<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.23</h1>
 
 <div class="modules">
 
@@ -376,6 +376,7 @@
                     <input type="range" id="sl-bpslope" min="0" max="3" step="1" value="1">
                   </div>
                 </div>
+                <div style="font-size:9px;color:var(--muted);opacity:0.7;margin-top:6px">Escuchar banda (aislar el punto seleccionado) solo está en el plugin: la versión web no tiene aislamiento.</div>
               </div>
             </div>
 
@@ -697,10 +698,10 @@ function combineGains(n, sr, role) {
   return responseAt(freqs, role);
 }
 
-// Frecuencias de dibujo: una por píxel, repartidas en log de 20 Hz a 20 kHz
+// Frecuencias de dibujo: una por píxel, repartidas en log de 20 Hz a 30 kHz (v0.23)
 function plotFreqs() {
   const n = Math.max(200, Math.round(CHART_W || 800));
-  const lMin = Math.log10(20), lMax = Math.log10(20000);
+  const lMin = Math.log10(20), lMax = Math.log10(30000);
   const f = new Float64Array(n);
   for (let i = 0; i < n; i++) f[i] = Math.pow(10, lMin + (lMax - lMin) * i / (n - 1));
   return f;
@@ -1312,7 +1313,7 @@ const MAG_ZOOMS = [3, 6, 12, 24];
 let magZoom = 12;
 try { const z = parseInt(localStorage.getItem('excellecu.zoom')); if (MAG_ZOOMS.includes(z)) magZoom = z; } catch (e) {}
 const magLo = () => -magZoom * 1.1, magHi = () => magZoom * 1.1;
-const MAG_F_MIN = 20, MAG_F_MAX = 20000;
+const MAG_F_MIN = 20, MAG_F_MAX = 30000;   // v0.23: puntos y eje hasta 30 kHz
 function magGeom() {
   const W = CHART_W, H = MAG_H, PAD = MAG_PAD;
   const pw = W-PAD.l-PAD.r, ph = H-PAD.t-PAD.b;
@@ -1376,18 +1377,18 @@ function drawMag(curves, sr, sel) {
       // Relleno (más suave si hay dos curvas)
       ctx.beginPath(); let s=false;
       for (let k=0;k<curve.length;k++) {
-        const f=c.f[k]; if(f<20||f>20000) continue;
+        const f=c.f[k]; if(f<MAG_F_MIN||f>MAG_F_MAX) continue;
         if (!isFinite(curve[k])) continue;
         const x=toX(f), y=toY(curve[k]);
         if(!s){ctx.moveTo(x,zY);ctx.lineTo(x,y);s=true;}else ctx.lineTo(x,y);
       }
-      ctx.lineTo(toX(20000),zY); ctx.closePath();
+      ctx.lineTo(toX(MAG_F_MAX),zY); ctx.closePath();
       ctx.fillStyle = hexA(c.color, curves.length > 1 ? 0.08 : 0.15); ctx.fill();
 
       // Línea curva
       ctx.beginPath(); s=false;
       for (let k=0;k<curve.length;k++) {
-        const f=c.f[k]; if(f<20||f>20000) continue;
+        const f=c.f[k]; if(f<MAG_F_MIN||f>MAG_F_MAX) continue;
         if (!isFinite(curve[k])) continue;
         const x=toX(f), y=toY(curve[k]);
         if(!s){ctx.moveTo(x,y);s=true;}else ctx.lineTo(x,y);
@@ -1416,7 +1417,7 @@ function drawMag(curves, sr, sel) {
   if (sel) {
     ctx.beginPath(); let s = false;
     for (let k = 0; k < sel.db.length; k++) {
-      const f = sel.f[k]; if (f < 20 || f > 20000) continue;
+      const f = sel.f[k]; if (f < MAG_F_MIN || f > MAG_F_MAX) continue;
       const x = toX(f), y = toY(sel.db[k]);
       if (!s) { ctx.moveTo(x, y); s = true; } else ctx.lineTo(x, y);
     }
@@ -1910,7 +1911,7 @@ const fmtFreq = f => f >= 1000 ? (f/1000).toFixed(f >= 10000 ? 1 : 2) + ' kHz'
 // Slider logarítmico: posición 0..steps ↔ min..max
 const logToFreq = (v, L) => L.min * Math.pow(L.max / L.min, v / L.steps);
 const freqToLog = (f, L) => Math.round(L.steps * Math.log(f / L.min) / Math.log(L.max / L.min));
-const FC_RANGE = { min: 20, max: 20000, steps: 1000 };
+const FC_RANGE = { min: 20, max: 30000, steps: 1000 };
 const $id = id => document.getElementById(id);
 
 // Editar L o R fija sus valores: ya no se recopian de Estéreo
@@ -2421,7 +2422,7 @@ function presetXml(name, st) {
   const o = st.out;
   body += P('out_mode', o.mode === 'ms' ? 1 : 0) + P('out_link', o.link === false ? 0 : 1)
         + P('out_l', o.l) + P('out_r', o.r) + P('out_m', o.m) + P('out_s', o.s);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.22" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.23" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
 }
 
 // XML → estado. Lo que falta toma el valor por defecto del plugin; lo desconocido se ignora.
@@ -2445,7 +2446,7 @@ function parsePresetXml(text) {
     for (const k of KEYS) {
       b.sets[k] = {
         on: get(`b${n}_${k}_on`, 1) > 0.5,
-        fc: Math.min(20000, Math.max(20, get(`b${n}_${k}_fc`, 1000))),
+        fc: Math.min(30000, Math.max(20, get(`b${n}_${k}_fc`, 1000))),
         gain: BAND_TYPES[type].gain ? Math.min(12, Math.max(-20, get(`b${n}_${k}_gain`, 0))) : 0,
         q: roundQ(Math.min(10, Math.max(0.1, get(`b${n}_${k}_q`, 1)))),
         slope: SLOPES[Math.min(3, Math.max(0, Math.round(get(`b${n}_${k}_slope`, 1))))],

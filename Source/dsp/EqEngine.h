@@ -71,7 +71,9 @@ struct Params
 {
     std::array<Band, MAX_BANDS> bands;
     int n = 8192;                     // tamaño del filtro (N+1 muestras) y de su FFT de diseño (2N)
-    bool sameBands (const Params& o) const { return bands == o.bands; }
+    // Escuchar banda (solo del plugin, no está en la web): hueco y juego que se oyen solos; -1 = no
+    int soloSlot = -1, soloKey = St;
+    bool sameBands (const Params& o) const { return bands == o.bands && soloSlot == o.soloSlot && soloKey == o.soloKey; }
     bool anyGroup (Group g) const
     {
         for (auto& b : bands) if (b.used && modeGroup (b.edit) == g) return true;
@@ -161,9 +163,59 @@ inline const BandSet* activeSet (const Band& b, int role)
     return stage1 ? nullptr : &b.sets[role == RoleM ? M : S];
 }
 
+inline int clampKey (int k) { return k < St ? St : (k > S ? S : k); }
+
+// Escuchar banda: la forma de lo que hace la banda, de 0 a 1, sin su ganancia. Campana → pasa
+// banda gaussiano; shelf → su transición (1 en la zona realzada o atenuada); HPF / LPF → lo que
+// recortan. Una banda a 0 dB o apagada también suena con su forma.
+inline double soloShapeAt (int type, const BandSet& s, double f)
+{
+    if (f < 1) return type == HighPass ? 1.0 : 0.0;
+    const double sigma = (1.0 / s.q) * std::log10 (2.0) / 2.0;
+    const double d = std::log10 (f) - std::log10 (s.fc);
+    const double gauss = std::exp (-(d * d) / (2 * sigma * sigma));
+    switch (type)
+    {
+        case Bell:      return gauss;
+        case LowShelf:  return d <= 0 ? 1.0 : gauss;
+        case HighShelf: return d >= 0 ? 1.0 : gauss;
+        case HighPass:  return 1.0 - highPassAt (f, s.fc, s.slope);
+        case LowPass:   return 1.0 - lowPassAt (f, s.fc, s.slope);
+        default:        return 1.0;
+    }
+}
+
+// Rol en el que suena cada juego al escucharlo solo (el otro rol de su etapa queda en silencio)
+inline bool soloRoles (int key, int role, bool& isSolo, bool& silent)
+{
+    const bool stage1 = role == RoleL || role == RoleR;
+    isSolo = false; silent = false;
+    switch (key)
+    {
+        case St: isSolo = stage1; break;
+        case L:  isSolo = role == RoleL; silent = role == RoleR; break;
+        case R:  isSolo = role == RoleR; silent = role == RoleL; break;
+        case M:  isSolo = role == RoleM; silent = role == RoleS; break;
+        case S:  isSolo = role == RoleS; silent = role == RoleM; break;
+        default: break;
+    }
+    return isSolo || silent;
+}
+
 // Ganancia total de un rol en una lista de frecuencias (responseAt de la web)
 inline void responseAt (const Params& p, int role, const double* freqs, int count, double* g)
 {
+    if (p.soloSlot >= 0 && p.soloSlot < MAX_BANDS && p.bands[(size_t) p.soloSlot].used)
+    {
+        // Solo: en lugar de la curva, la forma de esa banda en su canal; lo demás, plano o en silencio
+        const auto& b = p.bands[(size_t) p.soloSlot];
+        const int key = clampKey (p.soloKey);
+        bool isSolo = false, silent = false;
+        soloRoles (key, role, isSolo, silent);
+        for (int i = 0; i < count; ++i)
+            g[i] = isSolo ? soloShapeAt (b.type, b.sets[(size_t) key], freqs[i]) : (silent ? 0.0 : 1.0);
+        return;
+    }
     for (int i = 0; i < count; ++i) g[i] = 1.0;
     for (const auto& b : p.bands)
     {

@@ -12,6 +12,26 @@ Original: `web/eq-dft-proto.html` (ahora v0.21). Objetivo: medirlo en Plugin Doc
 iterando. **Acuerdo (26/11/2026): cada avance del plugin se hace también en el HTML**, que Javier
 guarda como archivo; el HTML conserva además los motores Clásico, la ventana y el overlap.
 
+## v0.23 (26/11/2026): puntos hasta 30 kHz y escuchar banda
+
+- **Frecuencia de 20 Hz a 30 kHz** (antes 20 kHz), como el Pro-Q, para definir mejor la curva en
+  agudos: de un punto por encima de Nyquist el filtro aplica la parte que cae por debajo (un shelf
+  a 30 kHz sube más suave hasta 20 kHz). Rango del parámetro `fc`, eje de la gráfica (20 Hz–30 kHz),
+  límites al crear y arrastrar, presets y web. El motor no cambia. Las sesiones cargan bien
+  (guardan Hz); la automatización de frecuencia grabada antes se desplaza (cambia el normalizado).
+- **Escuchar banda (solo), solo en el plugin:** botón "Escuchar" en el panel de la banda. Sigue a
+  la banda seleccionada y al juego que se edita; sin banda seleccionada o al cerrar la ventana se
+  apaga. No es un parámetro, no se guarda con la sesión y no entra en el deshacer. Sin aviso
+  aparte (pedido así). Motor: `Params::soloSlot/soloKey`; con solo, `responseAt` devuelve la forma
+  de la banda (`soloShapeAt`: campana → gaussiana; shelf → su transición; HPF/LPF → 1 − filtro;
+  a 0 dB también suena) en su canal, y el otro canal de su etapa en silencio (L ↔ R, M ↔ S). Entra
+  y sale con el fundido de 2048 muestras. La gráfica sigue enseñando la curva del EQ.
+- Web v0.23: puntos hasta 30 kHz; nota en el panel de la banda: la versión web no tiene
+  aislamiento. Motor web y C++ siguen idénticos (el solo no existe en la web y sin solo nada cambia).
+- Pruebas: humo (punto a 30 kHz, shelf a 30 kHz a 12 kHz = curva, sesión; solo de campana, a 0 dB,
+  HPF, Side, L, sin solo, fuera del historial y de la sesión, en tiempo real sin saltos, sigue a la
+  selección, se apaga al cerrar; captura 09) y Chrome (30 kHz en gráfica y deslizador).
+
 ## v0.22 (26/11/2026): nueva disposición, escala vertical y RMS AES-17
 
 - Ventana sin gráfica de fase (queda "fase lineal ✓" en la barra de estado; la comprobación sigue
@@ -175,19 +195,7 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
 ## Pendiente / ideas
 
 - Quitar la fase plegada de la web al final del desarrollo.
-- **Frecuencia hasta 30 kHz** (pedido el 26/11, como el Pro-Q): poder poner un punto más allá de
-  20 kHz para definir mejor la curva en agudos (de un shelf a 30 kHz solo suena la parte de debajo
-  de Nyquist, más suave). Supone: rango de `fc` (¿también desde 10 Hz?), eje de la gráfica más
-  allá de 20 kHz, límites en `BandModel`, presets y web. Ojo: cambia el valor normalizado de `fc`,
-  así que la automatización ya grabada de frecuencias se movería (las sesiones guardan el valor
-  real y no se ven afectadas). Sin cambios en el motor.
-- **Escuchar banda (solo)** (pedido el 26/11): oír solo lo que hace la banda seleccionada. Idea:
-  con el solo activo, el motor sustituye la respuesta por la forma de esa banda normalizada,
-  S(f) = |G(f) − 1| / máx |G − 1| (campana → pasa banda gaussiano; shelf → su transición; HPF/LPF
-  → lo que recortan; si la ganancia es 0 dB, la forma como si tuviera ganancia), en su canal
-  (Estéreo, L, R, M o S; el resto en silencio). Encaja en `responseAt` con un campo de solo en
-  `Params`; el fundido de 2048 muestras evita clics. Estado no guardado en la sesión y aviso
-  visible ("SOLO") para que no se cuele en un bounce. En la web, con un ConvolverNode en directo.
+- ¿Ampliar también por abajo hasta 10 Hz, como el Pro-Q? (por ahora 20 Hz).
 - Confirmar el canal de la banda 3 de la TDM (Side o Mid).
 
 - EQ: codo suave en HPF/LPF; filtro de 16 384 a 88,2/96 kHz; modo de fase mínima opcional.

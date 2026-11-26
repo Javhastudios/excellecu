@@ -55,6 +55,12 @@ public:
     int selected = -1;
     int newBandType = eq::Bell;
 
+    // Escuchar banda (solo): lo activa el botón de la banda y sigue a la banda seleccionada.
+    // No es un parámetro ni se guarda con la sesión; al cerrar la ventana se apaga.
+    bool soloOn = false;
+    void setSolo (int slot, int key) { soloSlot.store (slot); soloKey.store (key); }
+    int soloSlotNow() const { return soloSlot.load(); }
+
     // "L y R parten de Estéreo mientras no se hayan tocado" (lrFresh de la web), por hueco
     bool isLrFresh (int slot) const;
     void setLrFresh (int slot, bool fresh);
@@ -114,7 +120,8 @@ private:
     // Ganancia de salida: L/R y luego M/S, con suavizado (en ganancia lineal)
     std::atomic<float>* outPtr[4] {};
     std::array<juce::LinearSmoothedValue<float>, 4> outSmooth;
-    std::vector<float> presetValues;   // valores del último preset cargado (para "modificado")
+    std::vector<float> presetValues;
+    std::atomic<int> soloSlot { -1 }, soloKey { eq::St };   // valores del último preset cargado (para "modificado")
 
     struct SetPtrs { std::atomic<float>* on; std::atomic<float>* fc; std::atomic<float>* gain; std::atomic<float>* q; std::atomic<float>* slope; };
     struct BandPtrs { std::atomic<float>* used; std::atomic<float>* type; std::atomic<float>* edit; std::array<SetPtrs, eq::NUM_KEYS> sets; };

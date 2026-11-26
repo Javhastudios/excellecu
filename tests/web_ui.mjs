@@ -66,6 +66,20 @@ zr = await page.evaluate(() => { const G = magGeom(); return G.fromY(G.PAD.t + G
 check(Math.abs(zr + 26.4) < 1e-6, 'escala ±24 dB');
 await page.click('#zoom-12');
 
+// ── v0.23: puntos hasta 30 kHz ──
+const hz = await page.evaluate(() => {
+  const G = magGeom();
+  const b = createBandAt('hs', G.W - G.PAD.r, G.toY(3));   // en el borde derecho de la gráfica
+  const fc = b.sets.st.fc;
+  selectedId = b.id; syncPanel();
+  const sl = document.getElementById('sl-bpfc');
+  sl.value = sl.max; sl.dispatchEvent(new Event('input'));
+  const fcMax = b.sets.st.fc;
+  deleteBand(b.id); commitHistory();
+  return { fc, fcMax };
+});
+check(Math.abs(hz.fc - 30000) < 1 && Math.abs(hz.fcMax - 30000) < 1, 'puntos hasta 30 kHz (gráfica y deslizador)');
+
 // ── salida ──
 await page.click('#out-ms');
 await page.$eval('#sl-out-b', el => { el.dispatchEvent(new Event('pointerdown')); el.value = 2; el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change', { bubbles: true })); });

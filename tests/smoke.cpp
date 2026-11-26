@@ -552,6 +552,109 @@ int main (int argc, char** argv)
         tmp.deleteFile();
     }
 
+
+    {
+        std::cout << "Frecuencia hasta 30 kHz" << std::endl;
+        ExcellecuProcessor p;
+        p.prepareToPlay (SR, 480);
+        ui::BandModel m (p);
+        const int b = m.create (eq::HighShelf, 30000, 6);
+        check (std::abs (m.band (b).sets[eq::St].fc - 30000) < 1, "un punto se puede crear a 30 kHz");
+        m.set (ids::set (b, eq::St, "q"), 0.5f);
+        auto o = run (p, 40000, sine (12000));
+        const double db12 = rmsDb (o[0], 20000, 40000, sineRms);
+        const double want = 20 * std::log10 (eq::highShelfAt (12000, 30000, 6, 0.5));
+        check (db12 > 0.3 && db12 < 5.9 && std::abs (db12 - want) < 0.05,
+               "shelf a 30 kHz: a 12 kHz sube " + String (db12, 2) + " dB (curva " + String (want, 2) + "), sin llegar al tope");
+        MemoryBlock st;
+        p.getStateInformation (st);
+        ExcellecuProcessor q;
+        q.setStateInformation (st.getData(), (int) st.getSize());
+        check (std::abs (q.currentParams().bands[(size_t) b].sets[eq::St].fc - 30000) < 1, "los 30 kHz se guardan con la sesión");
+    }
+
+    {
+        std::cout << "Escuchar banda" << std::endl;
+        ExcellecuProcessor p;
+        p.prepareToPlay (SR, 480);
+        ui::BandModel m (p);
+        const int bell = m.create (eq::Bell, 1000, 6);
+        m.set (ids::set (bell, eq::St, "q"), 2.0f);
+        m.create (eq::LowShelf, 100, -4);
+        p.setSolo (bell, eq::St);
+        auto at1k = run (p, 40000, sine (1000)), at4k = run (p, 40000, sine (4000));
+        const double d1 = rmsDb (at1k[0], 20000, 40000, sineRms), d4 = rmsDb (at4k[0], 20000, 40000, sineRms);
+        check (std::abs (d1) < 0.1, "campana en solo: su frecuencia pasa a 0 dB (" + String (d1, 2) + ")");
+        check (d4 < -40, "campana en solo: 4 kHz queda fuera (" + String (d4, 1) + " dB)");
+
+        // Campana a 0 dB: se oye igualmente su forma
+        m.set (ids::set (bell, eq::St, "gain"), 0.0f);
+        auto z = run (p, 40000, sine (1000));
+        check (std::abs (rmsDb (z[0], 20000, 40000, sineRms)) < 0.1, "una banda a 0 dB también se oye en solo");
+
+        // High pass en solo: se oye lo que recorta
+        const int hp = m.create (eq::HighPass, 500, 0);
+        m.set (ids::set (hp, eq::St, "slope"), 3.0f);
+        p.setSolo (hp, eq::St);
+        auto lo = run (p, 40000, sine (100)), hi = run (p, 40000, sine (4000));
+        check (rmsDb (lo[0], 20000, 40000, sineRms) > -0.5 && rmsDb (hi[0], 20000, 40000, sineRms) < -40,
+               "HPF en solo: suena lo de debajo del corte, no lo de arriba");
+
+        // Banda de Side en solo: con señal solo Mid no suena nada
+        const int sb = m.create (eq::Bell, 1000, 3);
+        m.setMode (sb, eq::S);
+        p.setSolo (sb, eq::S);
+        auto mid = run (p, 40000, sine (1000));
+        auto side = run (p, 40000, [] (int i, int c) { return (c == 0 ? 1.0f : -1.0f) * sine (1000) (i, c); });
+        check (rmsDb (mid[0], 20000, 40000, sineRms) < -100, "banda de Side en solo: el Mid queda en silencio");
+        check (std::abs (rmsDb (side[0], 20000, 40000, sineRms)) < 0.1 && std::abs (rmsDb (side[1], 20000, 40000, sineRms)) < 0.1,
+               "banda de Side en solo: el Side a su frecuencia pasa entero");
+
+        // Banda de L en solo: R en silencio
+        const int lb = m.create (eq::Bell, 2000, 4);
+        m.setMode (lb, eq::L);
+        p.setSolo (lb, eq::L);
+        auto lr = run (p, 40000, sine (2000));
+        check (std::abs (rmsDb (lr[0], 20000, 40000, sineRms)) < 0.1 && rmsDb (lr[1], 20000, 40000, sineRms) < -100,
+               "banda de L en solo: suena L, R en silencio");
+
+        // Quitar el solo: vuelve la curva normal
+        p.setSolo (-1, eq::St);
+        auto back = run (p, 40000, sine (1000));
+        check (std::abs (rmsDb (back[0], 20000, 40000, sineRms) - rmsDb (run (p, 40000, sine (1000))[0], 20000, 40000, sineRms)) < 0.01
+                   && rmsDb (back[0], 20000, 40000, sineRms) > -1,
+               "sin solo vuelve la curva del EQ");
+        p.history.flush();
+        const int before = p.history.undoCount();
+        p.setSolo (bell, eq::St);
+        p.setSolo (-1, eq::St);
+        p.history.flush();
+        check (p.history.undoCount() == before, "escuchar no entra en el historial");
+        MemoryBlock st;
+        p.setSolo (bell, eq::St);
+        p.getStateInformation (st);
+        ExcellecuProcessor q;
+        q.setStateInformation (st.getData(), (int) st.getSize());
+        check (q.currentParams().soloSlot == -1, "el solo no se guarda con la sesión");
+
+        // En tiempo real, con fundido: activar el solo no deja saltos
+        p.setSolo (-1, eq::St);
+        p.setNonRealtime (false);
+        AudioBuffer<float> buf (2, 480);
+        MidiBuffer midi;
+        float last = 0, maxStep = 0;
+        for (int blk = 0; blk < 300; ++blk)
+        {
+            if (blk == 150) p.setSolo (bell, eq::St);
+            for (int i = 0; i < 480; ++i) for (int c = 0; c < 2; ++c) buf.setSample (c, i, sine (1000) (blk * 480 + i, c));
+            p.processBlock (buf, midi);
+            Thread::sleep (2);
+            for (int i = 0; i < 480; ++i) { if (blk > 120) maxStep = std::max (maxStep, std::abs (buf.getSample (0, i) - last)); last = buf.getSample (0, i); }
+        }
+        const float sineStep = (float) (0.25 * 2 * eq::PI * 1000 / SR) * 2.0f;   // la curva a 1 kHz llega a +6 dB
+        check (maxStep <= sineStep * 1.05f, "activar el solo en tiempo real sin saltos (paso máx. " + String (maxStep, 4) + ")");
+    }
+
     {
         std::cout << "Interfaz" << std::endl;
         ExcellecuProcessor p;
@@ -623,6 +726,14 @@ int main (int argc, char** argv)
             p.selected = 3;
             MessageManager::getInstance()->runDispatchLoopUntil (200);
             snapshot (*ed, outDir.getChildFile ("08_minimo.png"));
+            // Escuchar la banda seleccionada (el botón se ve activo; la gráfica sigue enseñando la curva)
+            p.soloOn = true;
+            MessageManager::getInstance()->runDispatchLoopUntil (100);
+            check (p.soloSlotNow() == 3, "el botón Escuchar sigue a la banda seleccionada");
+            snapshot (*ed, outDir.getChildFile ("09_escuchar.png"));
+            p.selected = 1;
+            MessageManager::getInstance()->runDispatchLoopUntil (100);
+            check (p.soloSlotNow() == 1, "al seleccionar otra banda, se escucha esa");
             ed->setSize (1120, 1000);
         }
         ed.reset();
@@ -638,6 +749,7 @@ int main (int argc, char** argv)
             ed.reset();
         }
         check (true, "reabrir la ventana con banda seleccionada (0, 2, 3) y sin selección");
+        check (! p.soloOn && p.soloSlotNow() == -1, "al cerrar la ventana se deja de escuchar la banda");
     }
 
     std::cout << (failures == 0 ? "TODO BIEN" : String (failures) + " fallo(s)") << std::endl;

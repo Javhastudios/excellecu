@@ -22,7 +22,7 @@ inline const char* TYPE_SHORT[] = { "Campana", "L-Shelf", "H-Shelf", "HP", "LP" 
 inline const char* KEY_LABEL[] = { "", "L", "R", "M", "S" };
 
 constexpr double EQ_GAIN_MIN = -20, EQ_GAIN_MAX = 12, EQ_Q_MIN = 0.1, EQ_Q_MAX = 10;
-constexpr double MAG_F_MIN = 20, MAG_F_MAX = 20000;
+constexpr double MAG_F_MIN = 20, MAG_F_MAX = 30000;   // v0.23: hasta 30 kHz (eje y frecuencia de los puntos)
 
 class BandModel
 {

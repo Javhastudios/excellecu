@@ -18,7 +18,7 @@ int slopeIndex (int slope)
 
 void freqGrid (Graphics& g, float l, float r, float t, float bottom, float W)
 {
-    const double lMin = std::log10 (20.0), lMax = std::log10 (20000.0);
+    const double lMin = std::log10 (ui::MAG_F_MIN), lMax = std::log10 (ui::MAG_F_MAX);
     const float pw = W - l - r;
     for (int f : { 20, 100, 500, 1000, 5000, 10000, 20000 })
     {
@@ -74,7 +74,7 @@ void ChartData::compute (const eq::Params& params, double sampleRate, int plotWi
     // Curvas de diseño, un punto por píxel
     const int n = std::max (200, plotWidth);
     plotF.resize ((size_t) n);
-    const double lMin = std::log10 (20.0), lMax = std::log10 (20000.0);
+    const double lMin = std::log10 (ui::MAG_F_MIN), lMax = std::log10 (ui::MAG_F_MAX);
     for (int i = 0; i < n; ++i) plotF[(size_t) i] = std::pow (10.0, lMin + (lMax - lMin) * i / (n - 1));
     std::array<std::vector<double>, 4> P;
     for (int role = 0; role < 4; ++role)
@@ -257,12 +257,12 @@ void MagChart::paint (Graphics& g)
             for (size_t k = 0; k < c.db.size(); ++k)
             {
                 const double f = d.plotF[k];
-                if (f < 20 || f > 20000 || ! std::isfinite (c.db[k])) continue;
+                if (f < ui::MAG_F_MIN || f > ui::MAG_F_MAX || ! std::isfinite (c.db[k])) continue;
                 const float x = G.toX (f), y = G.toY (c.db[k]);
                 if (! s) { fill.startNewSubPath (x, zY); fill.lineTo (x, y); line.startNewSubPath (x, y); s = true; }
                 else { fill.lineTo (x, y); line.lineTo (x, y); }
             }
-            fill.lineTo (G.toX (20000), zY);
+            fill.lineTo (G.toX (ui::MAG_F_MAX), zY);
             fill.closeSubPath();
             g.setColour (c.colour.withAlpha (d.curves.size() > 1 ? 0.08f : 0.15f));
             g.fillPath (fill);
@@ -303,7 +303,7 @@ void MagChart::paint (Graphics& g)
         for (size_t k = 0; k < d.plotF.size(); ++k)
         {
             const double f = d.plotF[k];
-            if (f < 20 || f > 20000) continue;
+            if (f < ui::MAG_F_MIN || f > ui::MAG_F_MAX) continue;
             const double gk = live ? eq::bandGainAt (b.type, sp, f) : 1.0;
             const double db = gk > 1e-10 ? 20 * std::log10 (gk) : -120;
             const float x = G.toX (f), y = G.toY (db);

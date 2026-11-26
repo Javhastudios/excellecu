@@ -118,6 +118,9 @@ BandPanel::BandPanel (ExcellecuProcessor& p, ui::BandModel& m, std::function<voi
     deleteButton.setDanger (true);
     deleteButton.onClick = [this] { if (proc.selected >= 0) { model.remove (proc.selected); onChange(); } };
     addAndMakeVisible (deleteButton);
+    soloButton.setTooltip (u8 ("Escuchar solo lo que hace esta banda, en su canal (sigue a la banda seleccionada)"));
+    soloButton.onClick = [this] { proc.soloOn = ! proc.soloOn; onChange(); };
+    addAndMakeVisible (soloButton);
     onToggle.onClick = [this] { if (proc.selected >= 0) { model.markEdited (proc.selected); onChange(); } };
 
     fc.setup (*this, "Frecuencia");
@@ -168,6 +171,7 @@ void BandPanel::refresh()
         const auto b = model.band (boundSlot);
         const auto& p = b.sets[(size_t) b.edit];
         for (int t = 0; t < eq::NUM_TYPES; ++t) typeButtons[t]->setActive (t == b.type);
+        soloButton.setActive (proc.soloOn);
         for (int k = 0; k < eq::NUM_KEYS; ++k)
         {
             keyButtons[k]->setActive (k == b.edit);
@@ -187,7 +191,7 @@ void BandPanel::refresh()
 void BandPanel::resized()
 {
     const int pad = 12, w = getWidth(), iw = w - 2 * pad;
-    for (auto* c : std::initializer_list<Component*> { &onToggle, &deleteButton }) c->setVisible (hasBand);
+    for (auto* c : std::initializer_list<Component*> { &onToggle, &deleteButton, &soloButton }) c->setVisible (hasBand);
     for (auto* bt : typeButtons) bt->setVisible (hasBand);
     for (auto* bt : keyButtons) bt->setVisible (hasBand);
     for (Row* r : { &fc, &gain, &q, &slope }) r->slider.setVisible (false);
@@ -197,7 +201,8 @@ void BandPanel::resized()
     int y = 10;
     headRow = { pad, y, iw, 16 };
     deleteButton.setBounds (pad + iw - 104, y, 104, 16);
-    onToggle.setBounds (pad + iw - 104 - 12 - 62, y, 62, 16);
+    soloButton.setBounds (pad + iw - 104 - 10 - 70, y, 70, 16);
+    onToggle.setBounds (pad + iw - 104 - 10 - 70 - 12 - 62, y, 62, 16);
     y += 28;
 
     // Tipo y canal en la misma fila (si no caben, el canal baja)
@@ -258,7 +263,7 @@ void BandPanel::paint (Graphics& g)
     g.setColour (theme::text);
     g.setFont (theme::font (10.0f));
     g.drawText ("Banda " + String (model.number (boundSlot)) + u8 (" · ") + ui::TYPE_LABEL[b.type],
-                headRow.withTrimmedLeft (18).withTrimmedRight (190), Justification::centredLeft, true);
+                headRow.withTrimmedLeft (18).withTrimmedRight (270), Justification::centredLeft, true);
     g.setColour (theme::muted);
     g.setFont (theme::font (9.0f));
     g.drawText ("TIPO", typeLabel, Justification::centredLeft, false);
@@ -450,7 +455,13 @@ ExcellecuEditor::ExcellecuEditor (ExcellecuProcessor& p)
     startTimerHz (30);
 }
 
-ExcellecuEditor::~ExcellecuEditor() { setLookAndFeel (nullptr); }
+ExcellecuEditor::~ExcellecuEditor()
+{
+    // Escuchar banda solo vive mientras se ve la ventana
+    proc.soloOn = false;
+    proc.setSolo (-1, eq::St);
+    setLookAndFeel (nullptr);
+}
 
 void ExcellecuEditor::refreshNow()
 {
@@ -458,6 +469,10 @@ void ExcellecuEditor::refreshNow()
     // que llaman aquí antes de que existan todos los componentes: se ignoran hasta el final.
     if (! constructed) return;
     if (proc.selected >= 0 && ! model.used (proc.selected)) proc.selected = -1;
+    // Escuchar banda: sigue a la banda seleccionada y al juego que se edita; sin banda, se apaga
+    if (proc.soloOn && proc.selected < 0) proc.soloOn = false;
+    if (proc.soloOn) proc.setSolo (proc.selected, model.band (proc.selected).edit);
+    else proc.setSolo (-1, eq::St);
     for (int t = 0; t < eq::NUM_TYPES; ++t) newTypeButtons[t]->setActive (t == proc.newBandType);
     for (int i = 0; i < zoomButtons.size(); ++i) zoomButtons[i]->setActive (MagChart::ZOOMS[i] == mag.zoomDb());
     bandPanel.refresh();
@@ -469,7 +484,8 @@ void ExcellecuEditor::refreshNow()
     if (ch != shownChipsH) { shownChipsH = ch; layoutMagHeader(); }
     chips.repaint();
 
-    const auto prm = proc.currentParams();
+    auto prm = proc.currentParams();
+    prm.soloSlot = -1;   // la gráfica enseña la curva del EQ también mientras se escucha una banda
     const double sr = proc.sampleRateForUi();
     const int w = mag.getWidth();
     const bool changed = firstChart || ! prm.sameBands (shownParams) || prm.n != shownParams.n

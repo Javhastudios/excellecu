@@ -41,7 +41,7 @@ AudioProcessorValueTreeState::ParameterLayout createLayout()
             const String kp = pre + String::fromUTF8 (keyNames[k]) + " ";
             p.push_back (std::make_unique<AudioParameterBool> (ParameterID { ids::set (b, k, "on"), 1 }, kp + "activa", true));
             p.push_back (std::make_unique<AudioParameterFloat> (
-                ParameterID { ids::set (b, k, "fc"), 1 }, kp + "frecuencia", logRange (20.0f, 20000.0f, 0.0f), 1000.0f,
+                ParameterID { ids::set (b, k, "fc"), 1 }, kp + "frecuencia", logRange (20.0f, 30000.0f, 0.0f), 1000.0f,
                 AudioParameterFloatAttributes().withLabel ("Hz").withStringFromValueFunction ([] (float v, int) { return fmt::freq (v); })));
             p.push_back (std::make_unique<AudioParameterFloat> (
                 ParameterID { ids::set (b, k, "gain"), 1 }, kp + "ganancia", NormalisableRange<float> (-20.0f, 12.0f, 0.1f), 0.0f,
@@ -154,6 +154,8 @@ eq::Params ExcellecuProcessor::currentParams() const
         }
     }
     p.n = kWindow;
+    p.soloSlot = soloSlot.load();
+    p.soloKey = soloKey.load();
     return p;
 }
 
