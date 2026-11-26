@@ -2,9 +2,11 @@
 
 using namespace juce;
 
+// v0.25: letra normal (sin serifa) y 2 px más grande que la del diseño original, que era
+// monoespaciada de 8–11 px y costaba leer (comparada con FabFilter, ~12–13 px).
 Font theme::font (float size)
 {
-    return Font (FontOptions (Font::getDefaultMonospacedFontName(), size, Font::plain));
+    return Font (FontOptions (Font::getDefaultSansSerifFontName(), size + 2.0f, Font::plain));
 }
 
 static Colour colourProp (const Component& c, const char* name, Colour fallback)

@@ -25,7 +25,11 @@ public:
     void releaseResources() override;
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    void processBlockBypassed (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     using AudioProcessor::processBlock;
+    // Bypass propio: el DAW lo usa en lugar del suyo, así el audio puenteado sale con el mismo
+    // retraso que el procesado (sin saltos de tiempo al activarlo) y con un fundido corto.
+    juce::AudioProcessorParameter* getBypassParameter() const override { return bypassParam; }
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
@@ -115,6 +119,14 @@ private:
     };
 
     void applyOutputGain (float* const* ch, int numCh, int numSamples);
+    void processChunk (float* const* ch, int nc, int ns, bool forceBypass);
+
+    // Bypass: el audio de entrada pasa por un retraso igual a la latencia del motor y se funde
+    // con el procesado. El motor sigue trabajando puenteado para que la vuelta sea limpia.
+    juce::AudioParameterBool* bypassParam = nullptr;
+    juce::LinearSmoothedValue<float> bypassMix;            // 0 = procesado, 1 = puenteado
+    std::array<std::vector<float>, 2> dryRing, dryScratch;
+    int dryPos = 0, dryLen = 0;
     std::vector<float> currentValues() const;
 
     // Ganancia de salida: L/R y luego M/S, con suavizado (en ganancia lineal)

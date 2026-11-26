@@ -64,6 +64,20 @@ jobs:
         shell: bash
         run: cmake --build build --config Release --target Excellecu_All --parallel 4
 
+      - name: Motor con Accelerate frente al portable, y CPU de los dos (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          clang++ -std=c++17 -O2 -I Source tests/fft_check.cpp -o fft_portable
+          clang++ -std=c++17 -O2 -DEX_USE_ACCELERATE -I Source tests/fft_check.cpp -framework Accelerate -o fft_accel
+          ./fft_portable && ./fft_accel
+          clang++ -std=c++17 -O2 -I Source tests/engine_ref.cpp -o ref_portable
+          clang++ -std=c++17 -O2 -DEX_USE_ACCELERATE -I Source tests/engine_ref.cpp -framework Accelerate -o ref_accel
+          ./ref_portable ref.bin
+          ./ref_accel out.bin ref.bin
+          clang++ -std=c++17 -O3 -I Source tests/bench_engine.cpp -o bench_portable
+          clang++ -std=c++17 -O3 -DEX_USE_ACCELERATE -I Source tests/bench_engine.cpp -framework Accelerate -o bench_accel
+          echo "Portable:" && ./bench_portable && echo "Accelerate:" && ./bench_accel
+
       - name: Prueba de humo (Linux)
         if: runner.os == 'Linux'
         run: |

@@ -31,7 +31,7 @@ int BandChips::layoutHeight (int width)
         if (! b.used) continue;
         String text = String (model.number (s)) + " " + ui::TYPE_SHORT[b.type];
         if (b.edit != eq::St) text << " " << (eq::modeGroup (b.edit) == eq::GroupLR ? "L/R" : "M/S");
-        const int w = 6 + 7 + 4 + text.length() * 6 + 6;
+        const int w = 6 + 7 + 4 + text.length() * 7 + 8;
         if (x > 0 && x + w > width) { x = 0; y += h + 4; }
         chips.push_back ({ s, { x, y, w, h }, text });
         x += w + 4;
@@ -210,12 +210,12 @@ void BandPanel::resized()
     int x = pad + 38;
     for (auto* bt : typeButtons)
     {
-        const int bw = bt->getButtonText().length() * 6 + 12;
+        const int bw = bt->getButtonText().length() * 7 + 12;
         bt->setBounds (x, y, bw, 15);
         x += bw + 3;
     }
     int keysW = 0;
-    for (auto* bt : keyButtons) keysW += bt->getButtonText().length() * 6 + 12 + 3;
+    for (auto* bt : keyButtons) keysW += bt->getButtonText().length() * 7 + 12 + 3;
     keysW += 4;
     int kx = x + 20;
     if (kx + 44 + keysW > pad + iw) { y += 22; kx = pad; }
@@ -224,7 +224,7 @@ void BandPanel::resized()
     for (int k = 0; k < eq::NUM_KEYS; ++k)
     {
         auto* bt = keyButtons[k];
-        const int bw = bt->getButtonText().length() * 6 + 12;
+        const int bw = bt->getButtonText().length() * 7 + 12;
         if (k == 3) kx += 4; // separación entre L/R y M/S
         bt->setBounds (kx, y, bw, 15);
         kx += bw + 3;
@@ -604,7 +604,7 @@ void ExcellecuEditor::layoutMagHeader()
     for (int t = eq::NUM_TYPES; --t >= 0;)
     {
         auto* b = newTypeButtons[t];
-        const int bw = b->getButtonText().length() * 6 + 12;
+        const int bw = b->getButtonText().length() * 7 + 12;
         x -= bw;
         b->setBounds (x, titleRow.getY(), bw, 15);
         x -= 3;
@@ -613,7 +613,7 @@ void ExcellecuEditor::layoutMagHeader()
     zoomLabel = { titleRow.getX() + 90, titleRow.getY(), 46, 16 };
     for (auto* b : zoomButtons)
     {
-        const int bw = b->getButtonText().length() * 6 + 10;
+        const int bw = b->getButtonText().length() * 7 + 10;
         b->setBounds (zx, titleRow.getY(), bw, 15);
         zx += bw + 3;
     }

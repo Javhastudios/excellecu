@@ -164,7 +164,28 @@ check(Math.abs(mt.outR - 20 * Math.log10(0.5)) < 0.5, 'salida R ≈ −6 dBFS');
 check(Math.abs(mt.rmsR - 20 * Math.log10(0.5 / Math.SQRT2)) < 0.1, 'RMS de salida R ≈ −9,03 dBFS (' + mt.rmsR.toFixed(2) + ')');
 await page.evaluate(() => { selectedId = bands[3].id; syncPanel(); updateCharts(); });
 await page.waitForTimeout(50);
-await page.screenshot({ path: outDir + '/web_v022.png', fullPage: false, clip: { x: 0, y: 280, width: 1300, height: 960 } });
+await page.screenshot({ path: outDir + '/web_v024.png', fullPage: false, clip: { x: 0, y: 280, width: 1300, height: 960 } });
+// ── v0.24: analizador ──
+const an = await page.evaluate(() => {
+  ana.tilt = 0; ana.speed = 2; syncAnaButtons();
+  const G = magGeom();
+  const x = Math.round(G.toX(1000) - G.PAD.l);
+  const peak = arr => { let m = -999; for (let i = x - 3; i <= x + 3; i++) m = Math.max(m, arr[i]); return m; };
+  const far = arr => arr[Math.round(G.toX(8000) - G.PAD.l)];
+  return { active: ana.active, pre: ana.preDb && peak(ana.preDb), post: ana.postDb && peak(ana.postDb), farPost: ana.postDb && far(ana.postDb) };
+});
+await page.waitForTimeout(400);
+const an2 = await page.evaluate(() => {
+  const G = magGeom();
+  const x = Math.round(G.toX(1000) - G.PAD.l);
+  const peak = arr => { let m = -999; for (let i = x - 3; i <= x + 3; i++) m = Math.max(m, arr[i]); return m; };
+  return { active: ana.active, pre: peak(ana.preDb), post: peak(ana.postDb), far: ana.postDb[Math.round(G.toX(8000) - G.PAD.l)] };
+});
+console.log('     analizador', JSON.stringify(an2));
+// Seno de 1 kHz: L 0,9 y R 0,5 → mono 0,7 (−3,1 dBFS); Post con L +3 dB → (0,9·1,41+0,5)/2 = 0,886 (−1,05 dBFS)
+check(an2.active && Math.abs(an2.pre - 20 * Math.log10(0.7)) < 0.3, 'analizador Pre: seno de 1 kHz a −3,1 dBFS (' + an2.pre.toFixed(2) + ')');
+check(an2.post - an2.pre > 1.5, 'analizador Post: incluye EQ y salida, por encima del Pre (+' + (an2.post - an2.pre).toFixed(2) + ' dB)');
+check(an2.far < -80, 'lejos del seno, el analizador queda abajo (' + an2.far.toFixed(1) + ' dB)');
 check(await page.evaluate(() => rmsAes && document.getElementById('rms-aes').classList.contains('ms-active')), 'RMS en AES-17 por defecto');
 await page.click('#rms-flat');
 check(await page.evaluate(() => !rmsAes && localStorage.getItem('excellecu.rmsAes') === '0'), 'RMS sin ponderar (se recuerda)');

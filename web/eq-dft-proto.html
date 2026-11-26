@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EQ Motor DFT — Prototipo v0.23</title>
+<title>EQ Motor DFT — Prototipo v0.25</title>
 <style>
   :root {
     --bg: #0e0e10;
@@ -13,20 +13,21 @@
     --accent2: #3ecfa3;
     --warn: #f7a23e;
     --text: #e8e8f0;
-    --muted: #6b6b7e;
-    --font: 'JetBrains Mono', 'Fira Mono', monospace;
+    --muted: #a0a0b4;   /* v0.25: más contraste (antes #6b6b7e) */
+    --font: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', Inter, Arial, sans-serif;   /* v0.25: letra normal en vez de monoespaciada */
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     background: var(--bg);
     color: var(--text);
     font-family: var(--font);
-    font-size: 13px;
+    font-variant-numeric: tabular-nums;   /* cifras del mismo ancho, como una monoespaciada */
+    font-size: 14px;
     min-height: 100vh;
     padding: 24px;
   }
   h1 {
-    font-size: 14px; font-weight: 400;
+    font-size: 16px; font-weight: 400;
     color: var(--muted); letter-spacing: 0.12em;
     text-transform: uppercase; margin-bottom: 24px;
   }
@@ -47,17 +48,17 @@
     background: rgba(255,255,255,0.02);
   }
   .module-num {
-    font-size: 9px; letter-spacing: 0.15em;
+    font-size: 11px; letter-spacing: 0.15em;
     color: var(--accent); text-transform: uppercase;
     border: 0.5px solid var(--accent);
     border-radius: 3px; padding: 2px 6px;
   }
   .module-title {
-    font-size: 11px; letter-spacing: 0.1em;
+    font-size: 13px; letter-spacing: 0.1em;
     text-transform: uppercase; color: var(--text);
   }
   .module-status {
-    margin-left: auto; font-size: 10px;
+    margin-left: auto; font-size: 12px;
     color: var(--muted);
   }
   .module-status.ok { color: var(--accent2); }
@@ -73,7 +74,7 @@
     cursor: pointer;
     transition: all 0.2s;
     color: var(--muted);
-    font-size: 11px;
+    font-size: 13px;
     letter-spacing: 0.08em;
   }
   .drop-zone:hover, .drop-zone.drag-over {
@@ -99,18 +100,21 @@
     border-radius: 4px;
     padding: 8px 10px;
   }
-  .info-card .k { font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
-  .info-card .v { font-size: 13px; color: var(--accent2); margin-top: 2px; }
+  .info-card .k { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+  .info-card .v { font-size: 14px; color: var(--accent2); margin-top: 2px; }
 
   /* Módulo 2 */
-  .eq-layout { display: grid; grid-template-columns: minmax(0,1fr) 92px; gap: 16px; }
+  .eq-layout { display: grid; grid-template-columns: minmax(0,1fr) 112px; gap: 16px; }
   /* v0.22: gráfica a todo lo ancho, banda y salida debajo, fase plegada */
   .eq-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
   .mag-box, .strip-box, .phase-box { background: rgba(255,255,255,0.02); border: 0.5px solid var(--border); border-radius: 4px; padding: 10px; }
   .chips-row { display: flex; align-items: flex-start; gap: 8px; margin: 2px 0 6px; }
   .chips-row .band-chips { flex: 1; margin-bottom: 0; }
-  .band-count { font-size: 9px; color: var(--muted); white-space: nowrap; padding-top: 3px; }
-  .zoom-bar { display: flex; align-items: center; gap: 3px; margin-left: 24px; }
+  .band-count { font-size: 11px; color: var(--muted); white-space: nowrap; padding-top: 3px; }
+  .zoom-bar { display: flex; align-items: center; gap: 3px; margin-left: 20px; }
+  .mag-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 4px; }
+  .mag-head .newtype-bar { margin-left: auto; }
+  .ms-btn { white-space: nowrap; }
   .zoom-bar .ms-lbl, .newtype-bar .ms-lbl { margin-right: 4px; }
   .strip { display: grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr); gap: 12px; }
   .proto-strip { grid-template-columns: minmax(0,1fr) minmax(0,2fr); }
@@ -131,23 +135,23 @@
   .top-bar .sep { width: 14px; }
   .top-bar .ms-btn:disabled { opacity: 0.35; cursor: default; border-color: var(--border); color: var(--muted); }
   .preset-sel {
-    font-family: var(--font); font-size: 10px; color: var(--text); background: rgba(255,255,255,0.03);
+    font-family: var(--font); font-size: 12px; color: var(--text); background: rgba(255,255,255,0.03);
     border: 0.5px solid var(--border); border-radius: 3px; padding: 2px 4px; min-width: 170px;
   }
-  .preset-mod { font-size: 9px; color: var(--warn); margin: 0 6px; min-width: 70px; }
-  .out-note { font-size: 9px; color: var(--warn); line-height: 1.5; margin: -4px 0 10px; opacity: 0.9; }
-  .out-link { margin-left: auto; font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .preset-mod { font-size: 11px; color: var(--warn); margin: 0 6px; min-width: 70px; }
+  .out-note { font-size: 11px; color: var(--warn); line-height: 1.5; margin: -4px 0 10px; opacity: 0.9; }
+  .out-link { margin-left: auto; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; }
   .meters-box { background: rgba(255,255,255,0.02); border: 0.5px solid var(--border); border-radius: 4px; padding: 10px 6px; display: flex; flex-direction: column; align-self: start; height: 600px; }
   .meters-box canvas { width: 100%; flex: 1; min-height: 260px; cursor: pointer; }
   .eq-controls { display: flex; flex-direction: column; gap: 0; }
   .panel-title {
-    font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase;
+    font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase;
     color: var(--muted); margin-bottom: 10px; padding-bottom: 6px;
     border-bottom: 0.5px solid var(--border);
   }
   .control { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
   .control label {
-    font-size: 10px; color: var(--muted); letter-spacing: 0.06em;
+    font-size: 12px; color: var(--muted); letter-spacing: 0.06em;
     display: flex; justify-content: space-between;
   }
   .control label span { color: var(--accent2); }
@@ -167,7 +171,7 @@
   #ls-controls input[type=range]::-webkit-slider-thumb { background: #7c6af7; }
   #hs-controls input[type=range]::-webkit-slider-thumb { background: #D85A30; }
   .ms-btn {
-    padding: 2px 6px; font-size: 9px; font-family: var(--font);
+    padding: 2px 6px; font-size: 11px; font-family: var(--font);
     letter-spacing: 0.08em; background: none;
     border: 0.5px solid var(--border); border-radius: 3px;
     color: var(--muted); cursor: pointer; transition: all 0.15s;
@@ -176,7 +180,7 @@
   .ms-btn.ms-live { border-color: rgba(124,106,247,0.45); color: rgba(124,106,247,0.75); }
   .ms-btn.ms-active { border-color: var(--accent); color: var(--accent); background: rgba(124,106,247,0.1); }
   .ms-row { display: flex; align-items: center; gap: 3px; margin-bottom: 10px; }
-  .ms-row .ms-lbl { font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-right: auto; }
+  .ms-row .ms-lbl { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-right: auto; }
   .divider { border: none; border-top: 0.5px solid var(--border); margin: 12px 0; }
   .eq-section {
     background: rgba(247,162,62,0.04);
@@ -191,7 +195,7 @@
     background: rgba(124,106,247,0.12);
     border: 0.5px solid var(--accent);
     border-radius: 4px; color: var(--accent);
-    font-family: var(--font); font-size: 11px;
+    font-family: var(--font); font-size: 13px;
     letter-spacing: 0.1em; text-transform: uppercase;
     cursor: pointer; transition: all 0.15s; margin-top: 8px;
   }
@@ -205,13 +209,13 @@
     background: rgba(62,207,163,0.1);
     border: 0.5px solid var(--accent2);
     border-radius: 4px; color: var(--accent2);
-    font-family: var(--font); font-size: 11px;
+    font-family: var(--font); font-size: 13px;
     letter-spacing: 0.1em; text-transform: uppercase;
     cursor: pointer; transition: all 0.15s;
   }
   .export-btn:hover { background: rgba(62,207,163,0.2); }
   .export-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-  .export-info { font-size: 10px; color: var(--muted); line-height: 1.8; }
+  .export-info { font-size: 12px; color: var(--muted); line-height: 1.8; }
   .export-info .ok { color: var(--accent2); }
 
   .play-row { display: flex; gap: 8px; margin-top: 8px; }
@@ -219,7 +223,7 @@
     flex: 1; padding: 8px;
     background: none; border: 0.5px solid var(--border);
     border-radius: 4px; color: var(--muted);
-    font-family: var(--font); font-size: 10px;
+    font-family: var(--font); font-size: 12px;
     letter-spacing: 0.08em; text-transform: uppercase;
     cursor: pointer; transition: all 0.15s;
   }
@@ -241,17 +245,17 @@
   .band-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; min-height: 4px; }
   .band-chip {
     display: flex; align-items: center; gap: 4px; padding: 2px 6px;
-    font-size: 9px; font-family: var(--font); color: var(--muted);
+    font-size: 11px; font-family: var(--font); color: var(--muted);
     background: none; border: 0.5px solid var(--border); border-radius: 3px; cursor: pointer;
   }
   .band-chip .dot { width: 7px; height: 7px; border-radius: 50%; }
   .band-chip.sel { color: var(--text); border-color: var(--muted); background: rgba(255,255,255,0.05); }
   .band-chip.off { opacity: 0.45; }
-  .band-empty { font-size: 10px; color: var(--muted); line-height: 1.6; padding: 8px 2px 12px; opacity: 0.8; }
+  .band-empty { font-size: 12px; color: var(--muted); line-height: 1.6; padding: 8px 2px 12px; opacity: 0.8; }
   .band-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
   .band-swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-  .band-name { font-size: 10px; letter-spacing: 0.06em; color: var(--text); }
-  .band-on { margin-left: auto; font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .band-name { font-size: 12px; letter-spacing: 0.06em; color: var(--text); }
+  .band-on { margin-left: auto; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; }
   .band-on input { width: 13px; height: 13px; cursor: pointer; }
   .type-row { flex-wrap: wrap; }
   .band-del { width: 100%; margin-top: 4px; padding: 4px; }
@@ -259,13 +263,13 @@
   .bp-ctrl label span { color: var(--band-color, var(--accent2)); }
   #band-ctrls input[type=range]::-webkit-slider-thumb { background: var(--band-color, var(--accent)); }
   .newtype-bar { display: flex; align-items: center; gap: 3px; margin-left: auto; }
-  .newtype-bar .ms-lbl { font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-right: 4px; }
+  .newtype-bar .ms-lbl { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-right: 4px; }
   .ctx-menu {
     position: fixed; z-index: 50; display: none; min-width: 150px;
     background: #1d1d22; border: 0.5px solid var(--border); border-radius: 4px;
-    padding: 4px 0; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-size: 10px;
+    padding: 4px 0; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-size: 12px;
   }
-  .ctx-menu .ctx-title { padding: 4px 10px; font-size: 9px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+  .ctx-menu .ctx-title { padding: 4px 10px; font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
   .ctx-menu .ctx-item { padding: 5px 10px; color: var(--text); cursor: pointer; display: flex; justify-content: space-between; gap: 10px; }
   .ctx-menu .ctx-item:hover { background: rgba(124,106,247,0.15); }
   .ctx-menu .ctx-item.active { color: var(--accent); }
@@ -275,7 +279,7 @@
 </head>
 <body>
 
-<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.23</h1>
+<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.25</h1>
 
 <div class="modules">
 
@@ -289,7 +293,7 @@
     <div class="module-body">
       <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
         <div>Arrastra un archivo de audio aquí o haz clic para seleccionar</div>
-        <div style="margin-top:6px;font-size:9px;opacity:0.5">WAV · MP3 · FLAC · AAC · OGG</div>
+        <div style="margin-top:6px;font-size:11px;opacity:0.5">WAV · MP3 · FLAC · AAC · OGG</div>
       </div>
       <input type="file" id="file-input" accept="audio/*">
       <div class="audio-info" id="audio-info" style="display:none">
@@ -329,13 +333,19 @@
       <div class="eq-layout">
         <div class="eq-main">
           <div class="mag-box">
-            <div class="panel-title" style="display:flex;align-items:center;gap:4px">Magnitud
+            <div class="panel-title mag-head">Magnitud
               <div class="zoom-bar" id="zoom-bar"><span class="ms-lbl">Escala</span></div>
+              <div class="zoom-bar" id="ana-bar" title="Analizador de espectro durante la reproducción (0 a −90 dBFS)"><span class="ms-lbl">Analizador</span>
+                <button class="ms-btn" id="ana-pre" title="Espectro de la entrada (antes del EQ), en gris">Pre</button>
+                <button class="ms-btn" id="ana-post" title="Espectro de lo que suena (después del EQ y la salida)">Post</button>
+                <button class="ms-btn" id="ana-speed" title="Caída del analizador (clic para cambiar)">Media</button>
+                <button class="ms-btn" id="ana-tilt" title="Inclinación del analizador alrededor de 1 kHz (clic para cambiar). En 0, el ruido rosa sale plano">0 dB/oct</button>
+              </div>
               <div class="newtype-bar" id="newtype-bar"><span class="ms-lbl">Nuevo punto</span></div>
             </div>
             <div class="chips-row"><div id="band-chips" class="band-chips"></div><span id="band-count" class="band-count">0 / 12</span></div>
             <canvas id="cMag" height="320" style="touch-action:none"></canvas>
-            <div style="font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:0.04em;opacity:0.7">Doble clic = crear punto · clic derecho = elegir tipo / eliminar · arrastrar = frecuencia ↔ / ganancia ↕ · Mayús ↕ = Q / pendiente · Alt (⌥) = fino · rueda = Q / pendiente · Supr = eliminar · Ctrl/⌘+Z = deshacer</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:6px;letter-spacing:0.04em;opacity:0.7">Doble clic = crear punto · clic derecho = elegir tipo / eliminar · arrastrar = frecuencia ↔ / ganancia ↕ · Mayús ↕ = Q / pendiente · Alt (⌥) = fino · rueda = Q / pendiente · Supr = eliminar · Ctrl/⌘+Z = deshacer</div>
           </div>
 
           <div class="strip">
@@ -376,7 +386,7 @@
                     <input type="range" id="sl-bpslope" min="0" max="3" step="1" value="1">
                   </div>
                 </div>
-                <div style="font-size:9px;color:var(--muted);opacity:0.7;margin-top:6px">Escuchar banda (aislar el punto seleccionado) solo está en el plugin: la versión web no tiene aislamiento.</div>
+                <div style="font-size:11px;color:var(--muted);opacity:0.7;margin-top:6px">Escuchar banda (aislar el punto seleccionado) solo está en el plugin: la versión web no tiene aislamiento.</div>
               </div>
             </div>
 
@@ -395,7 +405,7 @@
                 <input type="range" id="sl-out-b" min="-24" max="12" step="0.1" value="0" title="Doble clic: 0 dB">
               </div>
               <div class="out-note" id="out-note" style="display:none"></div>
-              <div style="font-size:9px;color:var(--muted);line-height:1.6;opacity:0.7">En directo al reproducir el procesado y al exportar; no hace falta volver a procesar.</div>
+              <div style="font-size:11px;color:var(--muted);line-height:1.6;opacity:0.7">En directo al reproducir el procesado y al exportar; no hace falta volver a procesar.</div>
             </div>
           </div>
 
@@ -420,7 +430,7 @@
                     <button class="ms-btn" id="eng-exact" title="Convolución exacta con zero-padding: sin aliasing temporal ni huella de bloque">Exacto</button>
                     <button class="ms-btn" id="eng-classic" title="STFT original (Hann + overlap-add), con ventana periódica">Clásico</button>
                   </div>
-                  <div id="eng-note" style="font-size:9px;color:var(--muted);line-height:1.6;opacity:0.8"></div>
+                  <div id="eng-note" style="font-size:11px;color:var(--muted);line-height:1.6;opacity:0.8"></div>
                 </div>
                 <div>
                   <div class="control">
@@ -438,7 +448,7 @@
 
           <details class="phase-box" id="phase-details">
             <summary class="panel-title">Fase (diagnóstico)
-              <span id="phase-badge" style="font-size:9px;padding:2px 6px;border-radius:3px;margin-left:6px;background:rgba(62,207,163,0.12);color:#3ecfa3;border:0.5px solid rgba(62,207,163,0.3)">sin desplazamiento ✓</span>
+              <span id="phase-badge" style="font-size:11px;padding:2px 6px;border-radius:3px;margin-left:6px;background:rgba(62,207,163,0.12);color:#3ecfa3;border:0.5px solid rgba(62,207,163,0.3)">sin desplazamiento ✓</span>
             </summary>
             <canvas id="cPhase" height="130"></canvas>
           </details>
@@ -477,6 +487,7 @@
 </div>
 
 <script>
+const UI_FONT = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', Inter, Arial, sans-serif";   // v0.25
 // ── Estado global ─────────────────────────────────────────────────────
 const SR_INTERNAL = 44100;
 const N_OPTIONS   = [512,1024,4096,8192];
@@ -1101,7 +1112,7 @@ async function loadFile(file) {
   document.getElementById('ai-ch').textContent   = rawBuffer.numberOfChannels === 1 ? 'Mono' : 'Estéreo';
   document.getElementById('audio-info').style.display = 'grid';
   dropZone.classList.add('loaded');
-  dropZone.innerHTML = `<div>✓ ${file.name}</div><div style="margin-top:4px;font-size:9px;opacity:0.6">Haz clic para cambiar</div>`;
+  dropZone.innerHTML = `<div>✓ ${file.name}</div><div style="margin-top:4px;font-size:11px;opacity:0.6">Haz clic para cambiar</div>`;
 
   document.getElementById('m1-status').textContent = 'cargado ✓';
   document.getElementById('m1-status').className   = 'module-status ok';
@@ -1353,17 +1364,19 @@ function drawMag(curves, sr, sel) {
     const y = toY(db);
     ctx.beginPath(); ctx.strokeStyle = db===0?'rgba(255,255,255,0.15)':'rgba(255,255,255,0.05)';
     ctx.lineWidth = db===0?1:0.5; ctx.moveTo(PAD.l,y); ctx.lineTo(W-PAD.r,y); ctx.stroke();
-    ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.font='9px monospace'; ctx.textAlign='right';
+    ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.font='11px ' + UI_FONT; ctx.textAlign='right';
     ctx.fillText((db>0?'+':'')+db+'dB', PAD.l-3, y+3);
   });
   [20,100,500,1000,5000,10000,20000].forEach(f => {
     const x = toX(f);
     ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,0.05)'; ctx.lineWidth=0.5;
     ctx.moveTo(x,PAD.t); ctx.lineTo(x,H-PAD.b); ctx.stroke();
-    ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.font='9px monospace'; ctx.textAlign='center';
+    ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.font='11px ' + UI_FONT; ctx.textAlign='center';
     ctx.fillText(f>=1000?(f/1000)+'k':f, x, H-PAD.b+12);
   });
   const zY = toY(0);
+
+  drawAnalyzer(ctx, G);   // v0.24: espectro detrás de las curvas
 
   const anyActive = curves.some(c => c.db.some(v => Math.abs(v) > 0.001));
 
@@ -1401,7 +1414,7 @@ function drawMag(curves, sr, sel) {
         const step = 70, lx = W - PAD.r - curves.length * step + ci * step, ly = PAD.t + 8;
         ctx.strokeStyle=c.color; ctx.lineWidth=1.5; ctx.setLineDash(c.dash || []);
         ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(lx+14,ly); ctx.stroke(); ctx.setLineDash([]);
-        ctx.fillStyle=c.color; ctx.font='9px monospace'; ctx.textAlign='left';
+        ctx.fillStyle=c.color; ctx.font='11px ' + UI_FONT; ctx.textAlign='left';
         ctx.fillText(c.label, lx+18, ly+3);
       }
     });
@@ -1409,7 +1422,7 @@ function drawMag(curves, sr, sel) {
   } else {
     ctx.beginPath(); ctx.moveTo(PAD.l,zY); ctx.lineTo(W-PAD.r,zY);
     ctx.strokeStyle='rgba(255,255,255,0.15)'; ctx.lineWidth=1; ctx.stroke();
-    ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.font='9px monospace'; ctx.textAlign='center';
+    ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.font='11px ' + UI_FONT; ctx.textAlign='center';
     ctx.fillText(bands.length ? 'sin efecto' : 'doble clic para crear un punto · clic derecho para elegir el tipo', PAD.l+pw/2, zY+14);
   }
 
@@ -1426,7 +1439,7 @@ function drawMag(curves, sr, sel) {
     const fcX = toX(sel.fc);
     ctx.beginPath(); ctx.lineWidth = 0.5; ctx.globalAlpha = 0.35;
     ctx.setLineDash([3,3]); ctx.moveTo(fcX, PAD.t); ctx.lineTo(fcX, H-PAD.b); ctx.stroke(); ctx.setLineDash([]);
-    ctx.globalAlpha = 0.8; ctx.fillStyle = sel.color; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+    ctx.globalAlpha = 0.8; ctx.fillStyle = sel.color; ctx.font = '11px ' + UI_FONT; ctx.textAlign = 'center';
     ctx.fillText(fmtFreq(sel.fc), Math.max(PAD.l+22, Math.min(W-PAD.r-26, fcX)), PAD.t+10);
     ctx.globalAlpha = 1;
   }
@@ -1514,13 +1527,13 @@ function drawHandles(ctx, G) {
     ctx.globalAlpha = h.p.on ? 1 : 0.4;
     const lbl = ROLE_LABELS[h.key] || String(bandIndex(h.b));
     ctx.fillStyle = h.editing ? '#0e0e10' : col;
-    ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+    ctx.font = 'bold 10px ' + UI_FONT; ctx.textAlign = 'center';
     ctx.fillText(lbl, h.x, h.y + 3);
     ctx.globalAlpha = 1;
     // Lectura de valores al pasar por encima o arrastrar
     if (hot) {
       const txt = bandInfo(h.b, h.p) + (h.p.on ? '' : ' · apagada');
-      ctx.font = '9px monospace';
+      ctx.font = '11px ' + UI_FONT;
       const tw = ctx.measureText(txt).width + 10;
       let tx = h.x - tw/2, ty = h.y - r - 20;
       if (ty < G.PAD.t) ty = h.y + r + 6;
@@ -1818,7 +1831,7 @@ function drawPhase(phaseBefore, phaseAfter, gains, sr) {
     const y = PAD.t + ph/2 - deg/180*(ph/2);
     ctx.beginPath(); ctx.strokeStyle = deg===0?'rgba(255,255,255,0.15)':'rgba(255,255,255,0.05)';
     ctx.lineWidth = deg===0?1:0.5; ctx.moveTo(PAD.l,y); ctx.lineTo(W-PAD.r,y); ctx.stroke();
-    ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.font='9px monospace'; ctx.textAlign='right';
+    ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.font='11px ' + UI_FONT; ctx.textAlign='right';
     ctx.fillText(deg+'°', PAD.l-3, y+3);
   });
 
@@ -1826,7 +1839,7 @@ function drawPhase(phaseBefore, phaseAfter, gains, sr) {
     const x = PAD.l+(Math.log10(f)-fMin)/(fMax-fMin)*pw;
     ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,0.05)'; ctx.lineWidth=0.5;
     ctx.moveTo(x,PAD.t); ctx.lineTo(x,H-PAD.b); ctx.stroke();
-    ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.font='9px monospace'; ctx.textAlign='center';
+    ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.font='11px ' + UI_FONT; ctx.textAlign='center';
     ctx.fillText(f>=1000?(f/1000)+'k':f, x, H-PAD.b+12);
   });
 
@@ -1863,7 +1876,7 @@ function drawPhase(phaseBefore, phaseAfter, gains, sr) {
   ctx.setLineDash([]);
 
   // Leyenda
-  ctx.font='9px monospace'; ctx.textAlign='left';
+  ctx.font='11px ' + UI_FONT; ctx.textAlign='left';
   ctx.strokeStyle='#7c6af7'; ctx.lineWidth=1.5;
   ctx.beginPath(); ctx.moveTo(PAD.l+8,PAD.t+8); ctx.lineTo(PAD.l+22,PAD.t+8); ctx.stroke();
   ctx.fillStyle='#7c6af7'; ctx.fillText('antes EQ', PAD.l+26, PAD.t+11);
@@ -1878,7 +1891,7 @@ function drawPhase(phaseBefore, phaseAfter, gains, sr) {
     const fcX = PAD.l+(Math.log10(fc)-fMin)/(fMax-fMin)*pw;
     ctx.beginPath(); ctx.strokeStyle = sb.color; ctx.globalAlpha = 0.35; ctx.lineWidth=0.5;
     ctx.setLineDash([3,3]); ctx.moveTo(fcX,PAD.t); ctx.lineTo(fcX,H-PAD.b); ctx.stroke(); ctx.setLineDash([]);
-    ctx.globalAlpha = 0.8; ctx.fillStyle = sb.color; ctx.font='9px monospace'; ctx.textAlign='center';
+    ctx.globalAlpha = 0.8; ctx.fillStyle = sb.color; ctx.font='11px ' + UI_FONT; ctx.textAlign='center';
     ctx.fillText(fmtFreq(fc), fcX, PAD.t+10); ctx.globalAlpha = 1;
   }
 }
@@ -2154,6 +2167,157 @@ function initOut() {
   syncOut();
 }
 
+
+// ── Analizador de espectro (v0.24, primero en la web) ─────────────────
+// Durante la reproducción: Pre = archivo original; Post = lo que suena (procesado con la ganancia
+// de salida, o el original si se reproduce el original). Suma mono (L+R)/2, FFT de 8192 con Hann
+// terminando en la muestra que suena, un valor por píxel (máximo de los bins que caen en él o
+// interpolado en graves), subida rápida y caída según la velocidad. Escala propia: 0 a −90 dBFS
+// de arriba abajo (un seno a 0 dBFS marca 0), con inclinación alrededor de 1 kHz.
+const ANA_N = 8192, ANA_TOP = 0, ANA_RANGE = 90;
+const ANA_SPEEDS = [['Lenta', 12], ['Media', 30], ['Rápida', 80]];   // caída en dB/s
+const ANA_TILTS = [0, 1.5, 3, 4.5];   // con suma por bandas el ruido rosa ya sale plano en 0
+const ana = { pre: true, post: true, speed: 1, tilt: 0, preDb: null, postDb: null, last: 0, active: false };
+try {
+  const st = JSON.parse(localStorage.getItem('excellecu.ana2') || 'null');
+  if (st) Object.assign(ana, { pre: !!st.pre, post: !!st.post, speed: st.speed | 0, tilt: st.tilt | 0 });
+} catch (e) {}
+function saveAna() { try { localStorage.setItem('excellecu.ana2', JSON.stringify({ pre: ana.pre, post: ana.post, speed: ana.speed, tilt: ana.tilt })); } catch (e) {} }
+
+// FFT iterativa en el sitio (radix 2) con tablas precalculadas: rápida para cada fotograma
+const anaFft = (() => {
+  const n = ANA_N, levels = Math.log2(n);
+  const rev = new Uint32Array(n);
+  for (let i = 0; i < n; i++) { let r = 0; for (let b = 0; b < levels; b++) r |= ((i >> b) & 1) << (levels - 1 - b); rev[i] = r; }
+  const cos = new Float64Array(n / 2), sin = new Float64Array(n / 2);
+  for (let i = 0; i < n / 2; i++) { cos[i] = Math.cos(2 * Math.PI * i / n); sin[i] = -Math.sin(2 * Math.PI * i / n); }
+  const win = new Float64Array(n);
+  for (let i = 0; i < n; i++) win[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / n));
+  const re = new Float64Array(n), im = new Float64Array(n), pow = new Float64Array(n / 2 + 1);
+  // x(i) da la muestra i de la ventana; devuelve potencia por bin normalizada (seno a 0 dBFS = 1)
+  return function (x) {
+    for (let i = 0; i < n; i++) { re[rev[i]] = x(i) * win[i]; im[rev[i]] = 0; }
+    for (let size = 2; size <= n; size <<= 1) {
+      const half = size >> 1, step = n / size;
+      for (let i = 0; i < n; i += size) for (let j = 0, k = 0; j < half; j++, k += step) {
+        const a = i + j, b = a + half;
+        const tr = re[b] * cos[k] - im[b] * sin[k], ti = re[b] * sin[k] + im[b] * cos[k];
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+      }
+    }
+    const norm = 4 / n;   // 2/Σventana (Σ Hann = n/2), en amplitud
+    for (let k = 0; k <= n / 2; k++) pow[k] = (re[k] * re[k] + im[k] * im[k]) * norm * norm;
+    return pow;
+  };
+})();
+
+// Potencia por bin → dB por píxel de la gráfica, con la inclinación. Cada píxel suma la energía de
+// 1/12 de octava a su alrededor (como un analizador por bandas): un seno marca su nivel real y el
+// ruido rosa sale plano sin inclinación. La suma se divide entre el ancho de banda equivalente de
+// la ventana Hann (1,5 bins); en graves, donde 1/12 de octava es más estrecho que eso, se usa
+// como mínimo ese ancho, así los senos graves tampoco pierden nivel.
+const ANA_SMOOTH_OCT = 1 / 12, ANA_ENBW = 1.5;
+function anaToPixels(pow, sr, G) {
+  const binHz = sr / ANA_N, out = new Float32Array(Math.max(1, Math.round(G.pw)));
+  const tilt = ANA_TILTS[ana.tilt] || 0, half = Math.pow(2, ANA_SMOOTH_OCT / 2), kMax = ANA_N / 2;
+  const pAt = k => { if (k <= 0) return pow[0]; if (k >= kMax) return pow[kMax]; const i = Math.floor(k), t = k - i; return pow[i] * (1 - t) + pow[i + 1] * t; };
+  for (let x = 0; x < out.length; x++) {
+    const fc = G.fromX(G.PAD.l + x);
+    if (fc > sr / 2) { out[x] = -200; continue; }
+    const kc = fc / binHz;
+    const w = Math.max(kc * (half - 1 / half), ANA_ENBW);   // ancho de la banda en bins
+    const a = kc - w / 2, b = kc + w / 2;
+    let e = 0;
+    if (w <= 6) { const steps = 12; for (let j = 0; j < steps; j++) e += pAt(a + (j + 0.5) * w / steps); e *= w / steps; }
+    else { for (let k = Math.ceil(a); k <= Math.min(kMax, Math.floor(b)); k++) e += pow[k]; }
+    out[x] = 10 * Math.log10(e / ANA_ENBW + 1e-20) + tilt * Math.log2(fc / 1000);
+  }
+  return out;
+}
+
+function anaTick(now) {
+  const dt = ana.last ? Math.min(0.2, (now - ana.last) / 1000) : 0;
+  ana.last = now;
+  if (!ana.pre && !ana.post) { if (ana.active) { ana.active = false; ana.preDb = ana.postDb = null; redrawMagOnly(); } return; }
+  const G = magGeom();
+  let fresh = null;
+  if (playStart && audioCtx && rawBuffer) {
+    const sr = playStart.sr;
+    const lat = audioCtx.outputLatency || audioCtx.baseLatency || 0;
+    const end = Math.round((audioCtx.currentTime - playStart.t0 - lat) * sr);
+    const start = end - ANA_N;
+    const mono = (chs, M) => {
+      const a = chs[0], b = chs.length > 1 ? chs[1] : chs[0], n = a.length;
+      return i => {
+        const t = start + i;
+        if (t < 0 || t >= n) return 0;
+        let l = a[t], r = b[t];
+        if (M) { if (chs.length > 1) { const x = l * M.ll + r * M.rl, y = l * M.lr + r * M.rr; l = x; r = y; } else { l *= M.mono; r = l; } }
+        return 0.5 * (l + r);
+      };
+    };
+    fresh = {};
+    if (ana.pre) {
+      const raw = [];
+      for (let c = 0; c < rawBuffer.numberOfChannels; c++) raw.push(rawBuffer.getChannelData(c));
+      fresh.pre = anaToPixels(anaFft(mono(raw, null)), sr, G);
+    }
+    if (ana.post) fresh.post = anaToPixels(anaFft(mono(playStart.channels, playStart.withOut ? outMatrix() : null)), sr, G);
+  }
+  const fall = ANA_SPEEDS[ana.speed][1] * dt;
+  let visible = false;
+  const blend = (old, nw) => {
+    if (!nw && !old) return null;
+    const n = (nw || old).length;
+    if (!old || old.length !== n) old = new Float32Array(n).fill(-200);
+    for (let x = 0; x < n; x++) {
+      const v = nw ? nw[x] : -200;
+      old[x] = v > old[x] ? old[x] + (v - old[x]) * 0.6 : Math.max(v, old[x] - fall);   // subida rápida, caída suave
+      if (old[x] > ANA_TOP - ANA_RANGE) visible = true;
+    }
+    return old;
+  };
+  ana.preDb = ana.pre ? blend(ana.preDb, fresh && fresh.pre) : null;
+  ana.postDb = ana.post ? blend(ana.postDb, fresh && fresh.post) : null;
+  if (visible || ana.active) redrawMagOnly();
+  ana.active = visible;
+}
+
+function drawAnalyzer(ctx, G) {
+  if (!ana.active) return;
+  const yFor = db => G.PAD.t + Math.min(1, Math.max(0, (ANA_TOP - db) / ANA_RANGE)) * G.ph;
+  const bottom = G.PAD.t + G.ph;
+  const path = arr => {
+    ctx.beginPath(); ctx.moveTo(G.PAD.l, bottom);
+    for (let x = 0; x < arr.length; x++) ctx.lineTo(G.PAD.l + x, yFor(arr[x]));
+    ctx.lineTo(G.PAD.l + arr.length, bottom); ctx.closePath();
+  };
+  if (ana.preDb) {
+    path(ana.preDb);
+    ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 0.8; ctx.stroke();
+  }
+  if (ana.postDb) {
+    path(ana.postDb);
+    ctx.fillStyle = 'rgba(62,207,163,0.08)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(62,207,163,0.55)'; ctx.lineWidth = 1; ctx.stroke();
+  }
+}
+
+function syncAnaButtons() {
+  $id('ana-pre').classList.toggle('ms-active', ana.pre);
+  $id('ana-post').classList.toggle('ms-active', ana.post);
+  $id('ana-speed').textContent = ANA_SPEEDS[ana.speed][0];
+  $id('ana-tilt').textContent = (ANA_TILTS[ana.tilt] + ' dB/oct').replace('.', ',');
+}
+function initAnalyzer() {
+  $id('ana-pre').addEventListener('click', () => { ana.pre = !ana.pre; saveAna(); syncAnaButtons(); });
+  $id('ana-post').addEventListener('click', () => { ana.post = !ana.post; saveAna(); syncAnaButtons(); });
+  $id('ana-speed').addEventListener('click', () => { ana.speed = (ana.speed + 1) % ANA_SPEEDS.length; saveAna(); syncAnaButtons(); });
+  $id('ana-tilt').addEventListener('click', () => { ana.tilt = (ana.tilt + 1) % ANA_TILTS.length; saveAna(); syncAnaButtons(); });
+  syncAnaButtons();
+}
+
 // ── Medidores ────────────────────────────────────────────────────────
 // Durante la reproducción: entrada = archivo original, salida = lo que suena (procesado con la
 // ganancia de salida, o el original si se reproduce el original). Pico con caída de 20 dB/s,
@@ -2178,6 +2342,7 @@ function meterWindow(chs, idx, sr, M) {
 }
 
 function meterTick(now) {
+  anaTick(now);
   const dt = meters.last ? Math.min(0.2, (now - meters.last) / 1000) : 0;
   meters.last = now;
   let win = null;
@@ -2221,7 +2386,7 @@ function drawMeters() {
   const yFor = db => bottom - Math.min(1, Math.max(0, (db - METER_MIN) / (METER_MAX - METER_MIN))) * (bottom - top);
   const css = getComputedStyle(document.documentElement);
   const col = n => css.getPropertyValue(n).trim();
-  ctx.font = '8px ' + col('--font');
+  ctx.font = '10px ' + col('--font');
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   for (const db of [6, 0, -6, -12, -18, -24, -36, -48, -60]) {
     ctx.fillStyle = db === 0 ? col('--warn') : col('--muted');
@@ -2230,7 +2395,7 @@ function drawMeters() {
   const red = '#ff4d4d';
   ['in', 'out'].forEach((g, gi) => {
     const gx = gi === 0 ? 0 : groupW + scaleW;
-    ctx.font = '9px ' + col('--font'); ctx.fillStyle = col('--muted');
+    ctx.font = '11px ' + col('--font'); ctx.fillStyle = col('--muted');
     ctx.fillText(gi === 0 ? 'ENT' : 'SAL', gx + groupW / 2, titleH / 2);
     const nc = meters.ch, gap = 3, bw = (groupW - 6 - gap * (nc - 1)) / nc;
     let max = -120, clip = false;
@@ -2249,9 +2414,9 @@ function drawMeters() {
       };
       fill(m.peak, 0.45); fill(m.rms + (rmsAes ? AES17_OFFSET : 0), 0.85);
       if (m.hold > METER_MIN) { ctx.fillStyle = m.hold > 0 ? red : 'rgba(232,232,240,0.8)'; ctx.fillRect(x, yFor(m.hold) - 0.5, bw, 1.2); }
-      if (nc === 2) { ctx.font = '8px ' + col('--font'); ctx.fillStyle = col('--muted'); ctx.fillText(c ? 'R' : 'L', x + bw / 2, bottom + 6); }
+      if (nc === 2) { ctx.font = '10px ' + col('--font'); ctx.fillStyle = col('--muted'); ctx.fillText(c ? 'R' : 'L', x + bw / 2, bottom + 6); }
     }
-    ctx.font = '9px ' + col('--font'); ctx.fillStyle = clip ? red : col('--text');
+    ctx.font = '11px ' + col('--font'); ctx.fillStyle = clip ? red : col('--text');
     ctx.fillText(max <= -99 ? '−∞' : (max > 0 ? '+' : '') + max.toFixed(1), gx + groupW / 2, bottom + 18);
   });
 }
@@ -2422,7 +2587,7 @@ function presetXml(name, st) {
   const o = st.out;
   body += P('out_mode', o.mode === 'ms' ? 1 : 0) + P('out_link', o.link === false ? 0 : 1)
         + P('out_l', o.l) + P('out_r', o.r) + P('out_m', o.m) + P('out_s', o.s);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.23" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.25" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
 }
 
 // XML → estado. Lo que falta toma el valor por defecto del plugin; lo desconocido se ignora.
@@ -2590,6 +2755,7 @@ setEngine(engine);
 initHandleEvents();
 initOut();
 initZoom();
+initAnalyzer();
 initMeters();
 initPresets();
 initHistory();

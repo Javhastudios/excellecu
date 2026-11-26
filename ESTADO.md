@@ -12,6 +12,55 @@ Original: `web/eq-dft-proto.html` (ahora v0.21). Objetivo: medirlo en Plugin Doc
 iterando. **Acuerdo (26/11/2026): cada avance del plugin se hace también en el HTML**, que Javier
 guarda como archivo; el HTML conserva además los motores Clásico, la ventana y el overlap.
 
+## v0.25 (26/11/2026): bypass alineado, menos CPU, letra legible y analizador en la web
+
+- **Bypass sin desalinear:** parámetro propio `bypass` que el plugin ofrece al DAW
+  (`getBypassParameter`), así el DAW llama a `processBlock` y el plugin decide. Puenteado, la
+  entrada sale por un retraso igual a la latencia del motor (4352 muestras): antes, con el bypass
+  del DAW, el audio salía sin retraso y saltaba ~90 ms respecto al resto de la mezcla. Fundido de
+  30 ms al entrar y salir; el motor sigue trabajando puenteado para que la vuelta sea limpia (la
+  CPU no baja al puentear). `processBlockBypassed` hace lo mismo para los formatos que lo usen.
+  Procesa por trozos si el DAW manda bloques mayores que los anunciados. El bypass no se guarda en
+  los presets, cargar uno no lo quita y no cuenta como "modificado".
+- Pruebas de humo: retraso exacto puenteado (dif. 0), `processBlockBypassed`, bloques grandes, EQ
+  plano sin diferencia al alternar, con EQ sin saltos, presets. Pendiente de pluginval en GitHub
+  Actions con la próxima compilación.
+- **Analizador de espectro, en la web (v0.24) para probarlo antes de pasarlo al plugin.** Detrás de
+  la curva, mientras suena: Pre (entrada, en gris) y Post (lo que suena, con EQ y salida, en
+  verde), conmutables. Suma mono (L+R)/2, FFT de 8192 con Hann terminando en la muestra que suena
+  (descuenta la latencia de salida del navegador). Cada píxel suma la energía de 1/12 de octava
+  dividida entre el ancho equivalente de la ventana (1,5 bins; mínimo ese ancho en graves): un seno
+  marca su nivel real (seno a 0 dBFS = 0) y el ruido rosa sale plano. Escala propia de 0 a −90 dBFS
+  de arriba abajo. Caída lenta / media / rápida (12 / 30 / 80 dB/s), subida rápida. Inclinación 0 /
+  1,5 / 3 / 4,5 dB/oct alrededor de 1 kHz (0 por defecto). Se recuerda en el navegador. Prueba en
+  Chrome: seno de 1 kHz leído en −3,10 dBFS (esperado −3,10), Post con salida +2,04 dB.
+  Para el plugin habrá que alinear la entrada con la salida (retrasada la latencia).
+- **Legibilidad (web v0.25 y plugin):** costaba leer las letras (comparado con FabFilter). Letra
+  normal sin serifa en vez de monoespaciada (cifras de ancho fijo en la web con
+  `tabular-nums`), 2 px más grande en todo (8–11 px → 10–13 px), gris de etiquetas más claro
+  (`#6b6b7e` → `#a0a0b4`) y cifras de la gráfica más visibles (opacidad 0,2 → 0,55). En la web,
+  la cabecera de la gráfica pasa a dos filas si no cabe y la columna de nivel se ensancha a 112 px.
+  En el plugin, `theme::font` suma 2 px y usa la letra sin serifa del sistema; botones y chips
+  algo más anchos.
+
+- **Menos CPU en el motor (mismo sonido, misma latencia):**
+  1. L y R comparten una FFT compleja a la ida y otra a la vuelta (L real, R imaginaria): la mitad
+     de FFT.
+  2. Convolución particionada no uniforme: 4 trozos de 256 al principio del filtro y trozos de
+     1024 desde el tap 1024 (cada uno empieza en su propio tamaño, así la cola se calcula cada 1024
+     muestras sin latencia extra). Probados también 256+512, 256+2048 y 256+1024+4096: peor.
+  3. FFT radix 4 con tablas contiguas por etapa (vectoriza con clang); en macOS, FFT de Accelerate
+     (`vDSP_fft_zipD`, `EX_USE_ACCELERATE` solo en el plugin de Mac).
+  Resultado en esta máquina (Linux, clang -O3, FFT portable): con la TDM, de ~10,8 a ~5,7 ms por
+  segundo de audio; contando instrucciones en marcha, −46 % con la TDM y −40 % con solo bandas en
+  Estéreo. Salida idéntica al motor anterior: `tests/engine_ref.cpp` (estéreo y mono, filtros de
+  512 a 8192, fundidos, solo, bloques aleatorios) da 1,4e-14 de diferencia máxima; la comparación
+  con la web sigue exacta. Medidor propio: `tests/bench_engine.cpp`. Accelerate no se puede
+  ejecutar aquí: GitHub Actions lo compara con la FFT portable en el Mac (`tests/fft_check.cpp` y
+  `engine_ref`) y mide las dos. Pendiente de medir en Plugin Doctor.
+- Versión: plugin 0.25.0, igual que la web (la web v0.24 fue el analizador; el plugin salta de
+  0.23 a 0.25). El analizador sigue solo en la web.
+
 ## v0.23 (26/11/2026): puntos hasta 30 kHz y escuchar banda
 
 - **Frecuencia de 20 Hz a 30 kHz** (antes 20 kHz), como el Pro-Q, para definir mejor la curva en
