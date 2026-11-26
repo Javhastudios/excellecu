@@ -36,6 +36,8 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
   High): frecuencia superpuesta de 5 Hz a 20 kHz (+1,7 dB a 20 kHz); impulso en 98,6 ms frente a
   ~211 ms, mismo pre-ringing; Hammerstein, armónicos 2.º–6.º bajo −120 dB en todo el rango; CPU
   ~3,6 ms por bloque de 16 384 frente a ~1,3 ms del Pro-Q (si la curva clara es Excellecu).
+  THD con seno de 24,2 Hz a 0 dB: −158,9 dB (THD+N −149,4) frente a −145,3 dB (−134,3) del Pro-Q.
+  IMD SMPTE: 0,00 % en los dos; espurios de Excellecu bajo −175 dB, del Pro-Q hasta ≈ −150 dB.
 
 ## v0.22 (26/11/2026): nueva disposición, escala vertical y RMS AES-17
 
