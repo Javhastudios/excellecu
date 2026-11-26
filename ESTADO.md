@@ -35,7 +35,7 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
 - Medido en Plugin Doctor (26/11, 44,1 kHz, TDM con el shelf a 30 kHz, frente al Pro-Q 3 Linear
   High): frecuencia superpuesta de 5 Hz a 20 kHz (+1,7 dB a 20 kHz); impulso en 98,6 ms frente a
   ~211 ms, mismo pre-ringing; Hammerstein, armónicos 2.º–6.º bajo −120 dB en todo el rango; CPU
-  ~3,6 ms por bloque de 16 384 frente a ~1,3 ms del Pro-Q (si la curva clara es Excellecu).
+  ~3,6 ms por bloque de 16 384 frente a ~1,3 ms del Pro-Q (confirmado: la clara es Excellecu).
   THD con seno de 24,2 Hz a 0 dB: −158,9 dB (THD+N −149,4) frente a −145,3 dB (−134,3) del Pro-Q.
   IMD SMPTE: 0,00 % en los dos; espurios de Excellecu bajo −175 dB, del Pro-Q hasta ≈ −150 dB.
 
@@ -209,6 +209,9 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
 ## Pendiente / ideas
 
 - Quitar la fase plegada de la web al final del desarrollo.
+- Opcional: bajar la CPU (2,5–3 veces la del Pro-Q) con particiones no uniformes (trozos pequeños
+  al principio del filtro y grandes en la cola): misma latencia y sonido, suele dividir el gasto
+  entre 2 y 4.
 - ¿Ampliar también por abajo hasta 10 Hz, como el Pro-Q? (por ahora 20 Hz).
 - Confirmar el canal de la banda 3 de la TDM (Side o Mid).
 
