@@ -32,6 +32,11 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
   HPF, Side, L, sin solo, fuera del historial y de la sesión, en tiempo real sin saltos, sigue a la
   selección, se apaga al cerrar; captura 09) y Chrome (30 kHz en gráfica y deslizador).
 
+- Medido en Plugin Doctor (26/11, 44,1 kHz, TDM con el shelf a 30 kHz, frente al Pro-Q 3 Linear
+  High): frecuencia superpuesta de 5 Hz a 20 kHz (+1,7 dB a 20 kHz); impulso en 98,6 ms frente a
+  ~211 ms, mismo pre-ringing; Hammerstein, armónicos 2.º–6.º bajo −120 dB en todo el rango; CPU
+  ~3,6 ms por bloque de 16 384 frente a ~1,3 ms del Pro-Q (si la curva clara es Excellecu).
+
 ## v0.22 (26/11/2026): nueva disposición, escala vertical y RMS AES-17
 
 - Ventana sin gráfica de fase (queda "fase lineal ✓" en la barra de estado; la comprobación sigue
