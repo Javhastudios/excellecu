@@ -304,7 +304,7 @@ void MagChart::paint (Graphics& g)
         {
             const double f = d.plotF[k];
             if (f < ui::MAG_F_MIN || f > ui::MAG_F_MAX) continue;
-            const double gk = live ? eq::bandGainAt (b.type, sp, f) : 1.0;
+            const double gk = live ? eq::bandGainAt (b.type, sp, f, b.shape, b.res, b.knee) : 1.0;
             const double db = gk > 1e-10 ? 20 * std::log10 (gk) : -120;
             const float x = G.toX (f), y = G.toY (db);
             if (! started) { line.startNewSubPath (x, y); started = true; } else line.lineTo (x, y);
@@ -553,6 +553,23 @@ void MagChart::showMenu (const MouseEvent& e)
         m.addSectionHeader ("Banda " + String (model.number (slot)) + u8 (" · tipo"));
         for (int t = 0; t < eq::NUM_TYPES; ++t)
             m.addItem (ui::TYPE_LABEL[t], true, b.type == t, [safe, slot, t] { if (safe) { safe->model.setType (slot, t); safe->changed(); } });
+        // Forma, resonancia y codo (como la web): cada apartado solo cuando aplica
+        auto choice = [&] (const char* title, const char* field, std::initializer_list<const char*> names, int current) {
+            m.addSeparator();
+            m.addSectionHeader (String::fromUTF8 (title));
+            int i = 0;
+            for (const char* n : names)
+            {
+                const int v = i++;
+                m.addItem (String::fromUTF8 (n), true, current == v, [safe, slot, field, v] {
+                    if (safe) { safe->model.set (ids::band (slot, field), (float) v); safe->changed(); }
+                });
+            }
+        };
+        if (eq::typeHasGain (b.type)) choice ("Forma", "shape", { "TDM", "Classic" }, b.shape);
+        const bool classicShelf = b.shape == eq::ShapeClassic && (b.type == eq::LowShelf || b.type == eq::HighShelf);
+        if (classicShelf) choice ("Resonancia", "res", { "Las dos", "Base", "Cénit" }, b.res);
+        if (classicShelf && b.res != eq::ResBoth) choice ("Codo", "knee", { "Recorte", "Suave", "Más suave" }, b.knee);
         m.addSeparator();
         const bool on = b.sets[(size_t) b.edit].on;
         m.addItem (on ? "Apagar" : "Encender", [safe, slot, on] {

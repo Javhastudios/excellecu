@@ -103,6 +103,17 @@ scenarios.hpf_graves = { N: 8192, overlap: 0.75, bands: [
   { type: 'bell', st: { fc: 64, gain: 5, q: 1 } },
   { type: 'bell', edit: 's', s: { fc: 100, gain: -6, q: 1 } },
 ] };
+// Formas Classic (v0.27–v0.30): campana, shelves con las tres resonancias y los tres codos
+scenarios.classic = { N: 8192, overlap: 0.75, bands: [
+  { type: 'bell', shape: 'classic', st: { fc: 900, gain: 7, q: 1.4 } },
+  { type: 'ls', shape: 'classic', st: { fc: 120, gain: 5, q: 2 } },
+  { type: 'hs', shape: 'classic', res: 'base', st: { fc: 7000, gain: -6, q: 3 } },
+  { type: 'ls', shape: 'classic', res: 'top', knee: 'soft', st: { fc: 400, gain: -4, q: 2.5 } },
+  { type: 'hs', shape: 'classic', res: 'top', knee: 'softer', st: { fc: 3000, gain: 4, q: 4 } },
+  { type: 'ls', shape: 'classic', res: 'base', knee: 'soft', edit: 's', s: { fc: 250, gain: 6, q: 3 } },
+  { type: 'hs', shape: 'classic', res: 'base', knee: 'softer', edit: 'l', l: { fc: 12000, gain: 3, q: 2 }, r: { fc: 9000, gain: -3, q: 5 } },
+  { type: 'bell', shape: 'classic', edit: 'm', m: { fc: 2000, gain: -8, q: 0.6 } },
+] };
 const runs = [];
 for (const [name, sc] of Object.entries(scenarios)) runs.push(['x_' + name, sc, 'exact']);
 for (const [name, sc, engineMode] of runs) {
@@ -124,6 +135,7 @@ for (const [name, sc, engineMode] of runs) {
       const b = makeBand(s.type, s.st || {});
       bands.push(b);
       b.edit = s.edit || 'st';
+      b.shape = s.shape || 'tdm'; b.res = s.res || 'both'; b.knee = s.knee || 'clip';
       for (const k of ['l','r','m','s']) if (s[k]) Object.assign(b.sets[k], s[k]);
     }
     rawBuffer = __buf;`, ctx);
@@ -139,6 +151,7 @@ for (const [name, sc, engineMode] of runs) {
   const lines = [`channels ${numCh}`, `N ${sc.N}`, `overlap ${sc.overlap}`, `engine ${engineMode}`];
   bands.forEach((b, slot) => {
     lines.push(`band ${slot} ${TYPES.indexOf(b.type)} ${KEYS.indexOf(b.edit)}`);
+    lines.push(`shape ${slot} ${b.shape === 'classic' ? 1 : 0} ${['both', 'base', 'top'].indexOf(b.res || 'both')} ${['clip', 'soft', 'softer'].indexOf(b.knee || 'clip')}`);
     KEYS.forEach((k, ki) => {
       const p = b.sets[k];
       lines.push(`set ${slot} ${ki} ${p.on ? 1 : 0} ${p.fc} ${p.gain} ${p.q} ${p.slope}`);

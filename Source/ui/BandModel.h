@@ -93,6 +93,9 @@ public:
         base.gain = eq::typeHasGain (type) ? std::round (juce::jlimit (EQ_GAIN_MIN, EQ_GAIN_MAX, gain) * 10) / 10 : 0.0;
         set (ids::band (slot, "type"), (float) type);
         set (ids::band (slot, "edit"), (float) eq::St);
+        set (ids::band (slot, "shape"), (float) eq::ShapeTdm);   // los puntos nuevos, en TDM (como la web)
+        set (ids::band (slot, "res"), (float) eq::ResBoth);
+        set (ids::band (slot, "knee"), (float) eq::KneeClip);
         for (int k : { eq::St, eq::L, eq::R }) writeSet (slot, k, base);
         eq::BandSet ms = base;
         ms.on = eq::typeHasGain (type);

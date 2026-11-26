@@ -48,6 +48,13 @@ int main (int argc, char** argv)
                 auto& b = p.bands[(size_t) slot];
                 b.used = true; b.type = type; b.edit = edit;
             }
+            else if (key == "shape")
+            {
+                int slot, shape, res, knee;
+                ls >> slot >> shape >> res >> knee;
+                auto& b = p.bands[(size_t) slot];
+                b.shape = shape; b.res = res; b.knee = knee;
+            }
             else if (key == "set")
             {
                 int slot, k, on, slope;

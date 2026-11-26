@@ -7,6 +7,9 @@
 #include "ui/BandModel.h"
 #include "ui/Meters.h"
 #include "state/Presets.h"
+#include "ui/Format.h"
+
+#include <map>
 
 #include <iostream>
 #include <thread>
@@ -753,6 +756,73 @@ int main (int argc, char** argv)
     }
 
     {
+        std::cout << "Formas Classic, resonancia y codo (v0.30)" << std::endl;
+        ExcellecuProcessor p;
+        p.prepareToPlay (SR, 480);
+        p.setNonRealtime (true);
+        ui::BandModel m (p);
+        // Gana lo que dice la curva: seno a f, medido en dB
+        auto measure = [&] (double f) {
+            auto o = run (p, 48000, sine (f));
+            return rmsDb (o[0], 20000, 40000, sineRms);
+        };
+        const int b = m.create (eq::Bell, 1000, 6);
+        check (plain (p, ids::band (b, "shape")) == 0, "los puntos nuevos son TDM");
+        m.set (ids::band (b, "shape"), 1.0f);
+        const double atFc = measure (1000), oct = measure (2000);
+        const double want = 20 * std::log10 (eq::classicBellAt (2000, 1000, 6, 1));
+        check (std::abs (atFc - 6) < 0.1 && std::abs (oct - want) < 0.1,
+               "campana Classic +6 dB: " + String (atFc, 2) + " dB en fc, " + String (oct, 2) + " una octava arriba (curva " + String (want, 2) + ")");
+        m.setType (b, eq::LowShelf);
+        m.set (ids::set (b, eq::St, "q"), 3.0f);
+        const double half = measure (1000);
+        check (std::abs (half - 3) < 0.1, "low shelf Classic +6 dB: mitad de la ganancia en fc (" + String (half, 2) + " dB)");
+        const double dip = measure (1300);
+        m.set (ids::band (b, "res"), 2.0f);   // Cénit: el valle de la base se recorta
+        const double clipped = measure (1300);
+        check (dip < -1 && std::abs (clipped) < 0.1, "Cénit recorta el valle de la base (" + String (dip, 2) + " → " + String (clipped, 2) + " dB)");
+        double viaParams[3] {};
+        for (int k = 0; k < 3; ++k)
+        {
+            m.set (ids::band (b, "knee"), (float) k);
+            viaParams[k] = measure (1100);
+            const double curve = 20 * std::log10 (eq::classicShelfWithRes (eq::LowShelf, 1100, 1000, 6, 3, eq::ResTop, k));
+            check (std::abs (viaParams[k] - curve) < 0.1, String ("codo ") + (k == 0 ? "Recorte" : k == 1 ? "Suave" : "Más suave")
+                   + ": " + String (viaParams[k], 2) + " dB a 1,1 kHz (curva " + String (curve, 2) + ")");
+        }
+        check (viaParams[0] < viaParams[1] && viaParams[1] < viaParams[2], "Recorte < Suave < Más suave junto a la línea");
+        // Preset: se guardan y se leen; el formato de la web abre igual
+        auto xml = presets::capture (p, "C");
+        check (xml->getChildByAttribute ("id", ids::band (b, "knee")) != nullptr, "el preset guarda forma, resonancia y codo");
+        {
+            auto web = parseXML (String ("<ExcellecuPreset version=\"1\" name=\"W\" lrFresh=\"4095\">")
+                                 + "<P id=\"b1_used\" v=\"1\"/><P id=\"b1_type\" v=\"2\"/><P id=\"b1_shape\" v=\"1\"/>"
+                                 + "<P id=\"b1_res\" v=\"1\"/><P id=\"b1_knee\" v=\"2\"/></ExcellecuPreset>");
+            std::vector<float> vals; int fresh = 0;
+            presets::decode (p, *web, vals, fresh);
+            p.applyPreset (vals, fresh, "W");
+            const auto bb = m.band (0);
+            check (bb.shape == eq::ShapeClassic && bb.res == eq::ResBase && bb.knee == eq::KneeSofter,
+                   "un preset de la web con forma, resonancia y codo abre igual");
+            std::vector<float> v2; presets::decode (p, *presets::factoryXml (presets::factoryList()[1]), v2, fresh);
+            p.applyPreset (v2, fresh, "TDM");
+            check (m.band (0).shape == eq::ShapeTdm, "los presets antiguos (sin forma) abren en TDM");
+        }
+        // Al borrar y crear otra vez, el punto nuevo vuelve a TDM
+        m.set (ids::band (0, "shape"), 1.0f);
+        m.remove (0);
+        const int again = m.create (eq::Bell, 500, 3);
+        check (again == 0 && m.band (0).shape == eq::ShapeTdm && m.band (0).res == eq::ResBoth && m.band (0).knee == eq::KneeClip,
+               "un punto nuevo en un hueco usado vuelve a TDM, Las dos y Recorte");
+        // Escribir valores
+        auto near = [] (double a, double b) { return std::abs (a - b) < 1e-9; };
+        check (near (fmt::parseNumber ("1,55k"), 1550) && near (fmt::parseNumber ("1500 Hz"), 1500) && near (fmt::parseNumber ("-2,5 dB"), -2.5)
+               && near (fmt::parseNumber ("24 dB/oct"), 24) && near (fmt::parseNumber ("2.5 kHz"), 2500) && near (fmt::parseNumber (" 0,71 "), 0.71)
+               && std::isnan (fmt::parseNumber ("abc")) && std::isnan (fmt::parseNumber ("")),
+               "leer lo escrito: 1,55k · 1500 Hz · -2,5 dB · 24 dB/oct · 2.5 kHz · 0,71; sin número, nada");
+    }
+
+    {
         std::cout << "Interfaz" << std::endl;
         ExcellecuProcessor p;
         p.prepareToPlay (SR, 480);
@@ -871,6 +941,74 @@ int main (int argc, char** argv)
             MessageManager::getInstance()->runDispatchLoopUntil (100);
             check (p.soloSlotNow() == 1, "al seleccionar otra banda, se escucha esa");
             ed->setSize (1120, 1000);
+        }
+        // Forma Classic en la interfaz: filas Forma / Resonancia / Codo y escribir valores con doble clic
+        {
+            for (int s2 = 0; s2 < eq::MAX_BANDS; ++s2) m.remove (s2);
+            const int ls = m.create (eq::LowShelf, 1000, 6);
+            m.set (ids::set (ls, eq::St, "q"), 3.0f);
+            m.set (ids::band (ls, "shape"), 1.0f);
+            m.set (ids::band (ls, "res"), 2.0f);
+            m.set (ids::band (ls, "knee"), 1.0f);
+            p.selected = ls;
+            MessageManager::getInstance()->runDispatchLoopUntil (200);
+            snapshot (*ed, outDir.getChildFile ("10_classic.png"));
+            BandPanel* panel = nullptr;
+            ValueEntry* entry = nullptr;
+            std::map<String, bool> visible;
+            std::function<void (Component&)> find = [&] (Component& c) {
+                for (auto* ch : c.getChildren())
+                {
+                    if (auto* bp = dynamic_cast<BandPanel*> (ch)) panel = bp;
+                    if (auto* ve = dynamic_cast<ValueEntry*> (ch)) if (ch->getParentComponent() == panel) entry = ve;
+                    if (auto* bt = dynamic_cast<MsButton*> (ch)) if (bt->isVisible()) visible[bt->getButtonText()] = true;
+                    find (*ch);
+                }
+            };
+            find (*ed);
+            find (*ed);   // segunda pasada: el campo del panel, ya conocido el panel
+            check (visible[String::fromUTF8 ("Classic")] && visible[String::fromUTF8 ("Cénit")] && visible[String::fromUTF8 ("Más suave")],
+                   "panel: Forma, Resonancia y Codo a la vista en un shelf Classic con Cénit");
+            ed->setSize (960, 760);
+            MessageManager::getInstance()->runDispatchLoopUntil (200);
+            snapshot (*ed, outDir.getChildFile ("11_classic_minimo.png"));
+            bool overlap = false;
+            {
+                std::vector<Rectangle<int>> rs;
+                for (auto* ch : panel->getChildren())
+                    if (auto* bt = dynamic_cast<MsButton*> (ch)) if (bt->isVisible()) rs.push_back (bt->getBounds());
+                for (size_t i = 0; i < rs.size(); ++i)
+                    for (size_t j = i + 1; j < rs.size(); ++j) overlap = overlap || rs[i].intersects (rs[j]);
+                for (auto& r : rs) overlap = overlap || ! panel->getLocalBounds().contains (r);
+            }
+            check (! overlap, "tamaño mínimo: los botones del panel no se pisan ni se salen");
+            ed->setSize (1120, 1000);
+            MessageManager::getInstance()->runDispatchLoopUntil (200);
+            // Doble clic en la cifra de la frecuencia → escribir «2,5k» → Intro
+            bool typed = false;
+            if (panel != nullptr && entry != nullptr)
+            {
+                auto src = Desktop::getInstance().getMainMouseSource();
+                const auto t0 = Time::getCurrentTime();
+                for (int y = 0; y < panel->getHeight() && ! typed; y += 3)
+                    for (int x = panel->getWidth() - 1; x >= 0 && ! typed; x -= 6)
+                    {
+                        const MouseEvent ev (src, { (float) x, (float) y }, ModifierKeys(), 1.0f, 0, 0, 0, 0, panel, panel, t0, { (float) x, (float) y }, t0, 2, false);
+                        panel->mouseDoubleClick (ev);
+                        if (! entry->isOpen()) continue;
+                        if (entry->getText() == "1k")
+                        {
+                            entry->setText ("2,5k");
+                            entry->keyPressed (KeyPress (KeyPress::returnKey));
+                            typed = true;
+                        }
+                        else entry->keyPressed (KeyPress (KeyPress::escapeKey));
+                    }
+            }
+            MessageManager::getInstance()->runDispatchLoopUntil (100);
+            check (typed && std::abs (plain (p, ids::set (ls, eq::St, "fc")) - 2500) < 1,
+                   "escribir «2,5k» en la frecuencia la pone a " + fmt::freq (plain (p, ids::set (ls, eq::St, "fc"))));
+            check (entry != nullptr && ! entry->isOpen(), "el campo se cierra al aplicar");
         }
         ed.reset();
 

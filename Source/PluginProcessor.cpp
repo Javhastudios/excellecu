@@ -64,6 +64,19 @@ AudioProcessorValueTreeState::ParameterLayout createLayout()
         p.push_back (std::make_unique<AudioParameterFloat> (
             ParameterID { outIds[i], 1 }, outNames[i], NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
             AudioParameterFloatAttributes().withLabel ("dB").withStringFromValueFunction ([] (float v, int) { return fmt::gain (v); })));
+
+    // Forma, resonancia y codo por banda (v0.30). Al final de la lista para no mover el orden
+    // de los parámetros que ya había.
+    for (int b = 0; b < eq::MAX_BANDS; ++b)
+    {
+        const String pre = "B" + String (b + 1) + " ";
+        p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ids::band (b, "shape"), 1 }, pre + "forma",
+                                                             StringArray { "TDM", "Classic" }, 0));
+        p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ids::band (b, "res"), 1 }, pre + "resonancia",
+                                                             StringArray { "Las dos", "Base", u8 ("Cénit") }, 0));
+        p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ids::band (b, "knee"), 1 }, pre + "codo",
+                                                             StringArray { "Recorte", "Suave", u8 ("Más suave") }, 0));
+    }
     return { p.begin(), p.end() };
 }
 } // namespace
@@ -114,6 +127,9 @@ ExcellecuProcessor::ExcellecuProcessor()
         bp.used = apvts.getRawParameterValue (ids::band (b, "used"));
         bp.type = apvts.getRawParameterValue (ids::band (b, "type"));
         bp.edit = apvts.getRawParameterValue (ids::band (b, "edit"));
+        bp.shape = apvts.getRawParameterValue (ids::band (b, "shape"));
+        bp.res = apvts.getRawParameterValue (ids::band (b, "res"));
+        bp.knee = apvts.getRawParameterValue (ids::band (b, "knee"));
         for (int k = 0; k < eq::NUM_KEYS; ++k)
         {
             auto& sp = bp.sets[(size_t) k];
@@ -144,6 +160,9 @@ eq::Params ExcellecuProcessor::currentParams() const
         if (! band.used) continue; // las bandas vacías quedan con valores por defecto (no afectan)
         band.type = idx (bp.type, eq::NUM_TYPES);
         band.edit = idx (bp.edit, eq::NUM_KEYS);
+        band.shape = idx (bp.shape, 2);
+        band.res = idx (bp.res, 3);
+        band.knee = idx (bp.knee, 3);
         for (int k = 0; k < eq::NUM_KEYS; ++k)
         {
             const auto& sp = bp.sets[(size_t) k];

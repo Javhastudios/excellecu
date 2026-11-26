@@ -8,11 +8,11 @@
 
 Prototipo de EQ de fase cero con curvas gaussianas y dos motores: Exacto (convolución con
 zero-padding, por defecto) y Clásico (FFT → ganancia por bin → FFT inversa → suma solapada).
-Original: `web/eq-dft-proto.html` (ahora v0.21). Objetivo: medirlo en Plugin Doctor y seguir
+Original: `web/eq-dft-proto.html` (ahora v0.30). Objetivo: medirlo en Plugin Doctor y seguir
 iterando. **Acuerdo (26/11/2026): cada avance del plugin se hace también en el HTML**, que Javier
 guarda como archivo; el HTML conserva además los motores Clásico, la ventana y el overlap.
 
-## En la rama `trabajo` (sin compilar)
+## v0.30 (26/11/2026): formas TDM/Classic, resonancia y codo de los shelves, escribir valores
 
 - **Salida enlazada:** al arrastrar un deslizador, el otro no se movía en pantalla hasta soltar
   el ratón (el sonido sí era correcto). `OutputPanel::refresh` dejaba quietos los dos mientras se
@@ -21,7 +21,7 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
 - **Cifra de RMS en los medidores** (plugin y web v0.26), bajo la del pico máximo: modo elegido
   (AES-17 o sin ponderar), canal más alto, refrescada 4 veces por segundo para poder leerla.
   Pruebas de humo y de Chrome.
-- **Web v0.27 (solo en la web, para probar antes de pasarlo al plugin):**
+- **Web v0.27–v0.30, y en el plugin desde la 0.30:**
   - **Forma por punto: TDM (la gaussiana de siempre) o Classic** (analógica de 2.º orden, solo
     magnitud, simétrica en dB; campana con la ganancia completa en fc y shelves con la mitad en
     fc, fórmulas RBJ analógicas). En campanas y shelves; HPF/LPF sin cambio. Puntos nuevos en TDM;
@@ -58,8 +58,32 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
     ganancia, nunca cruza la línea, high shelf = espejo del low; salto de pendiente en el codo
     15–26 dB/oct con Recorte y < 1 con Suave y Más suave (Q 2–4).
     Referencias del mercado: Steinberg StudioEQ (Shelf I/II/III) y DMG EQuilibrium.
-  - Al pasarlo al plugin: parámetros de forma, resonancia y codo por banda (y en `Params`/`bandGainAt` del motor C++,
-    igual que la web para la comparación), selector y menú, y etiquetas editables con doble clic.
+- **En el plugin (0.30.0, la misma versión que la web):**
+  - Motor: `Band::shape/res/knee` y `classicBellAt`, `classicLowShelfAt`, `classicHighShelfAt`,
+    `classicShelfWithRes` en `EqEngine.h`, copiados de la web. Comparación con la web: escenario
+    nuevo `classic` (campana, shelves con las tres resonancias y los tres codos, en Estéreo, L/R
+    y M/S): idéntico bit a bit, como los otros 8. Con formas TDM la salida no cambia
+    (`engine_ref` frente al motor anterior: diferencia 0).
+  - Parámetros `b{n}_shape` (TDM, Classic), `b{n}_res` (Las dos, Base, Cénit) y `b{n}_knee`
+    (Recorte, Suave, Más suave), al final de la lista para no mover los que había. Presets y
+    sesiones antiguos abren en TDM; un preset de la web con esos valores abre igual. Un punto
+    nuevo vuelve a TDM / Las dos / Recorte aunque el hueco se usara antes.
+  - Panel de la banda: filas Forma (campanas y shelves), Resonancia (shelves Classic) y Codo
+    (con Base o Cénit) junto a Tipo y Canal; bajan de fila si no caben. El alto del panel se
+    calcula con todas a la vista, así la gráfica no se mueve al cambiar de banda. Resonancia y
+    codo atenuados con Q ≤ 0,71. Lo mismo en el clic derecho de la gráfica. La curva punteada
+    de la banda seleccionada usa su forma.
+  - Escribir valores (`ui/ValueEntry.h`, `fmt::parseNumber`): doble clic en la cifra de
+    frecuencia, ganancia, Q, pendiente o ganancia de salida; Intro o salir del campo aplica, Esc
+    cancela; mientras se escribe, Supr y ⌘Z no llegan al plugin. Cada valor escrito es un paso
+    de deshacer. Con «Enlazar», la otra ganancia de salida se mueve lo mismo.
+  - Escuchar banda con forma Classic: suena lo que la curva se aparta de 0 dB en proporción a su
+    ganancia (12 dB de referencia si está a 0 dB), hasta 1. (TDM, como antes.)
+  - Prueba de humo: campana y shelf Classic medidos con senos frente a la curva, el recorte del
+    valle con Cénit, los tres codos (Recorte < Suave < Más suave junto a la línea), presets
+    (guardar, formato de la web, antiguos en TDM), punto nuevo en TDM, lectura de valores
+    escritos, panel con las tres filas, tamaño mínimo sin botones pisados, escribir «2,5k» con
+    doble clic. Capturas 10 (shelf Classic con Cénit y codo Suave) y 11 (tamaño mínimo).
 
 ## v0.25 (26/11/2026): bypass alineado, menos CPU, letra legible y analizador en la web
 

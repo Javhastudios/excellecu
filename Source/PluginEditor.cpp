@@ -115,6 +115,40 @@ BandPanel::BandPanel (ExcellecuProcessor& p, ui::BandModel& m, std::function<voi
         b->onClick = [this, k] { if (proc.selected >= 0) { model.setMode (proc.selected, k); onChange(); } };
         addAndMakeVisible (b);
     }
+    // Forma, resonancia y codo: cada botón fija su parámetro de la banda seleccionada
+    auto choiceButtons = [this] (juce::OwnedArray<MsButton>& arr, const char* field, std::initializer_list<const char*> names,
+                                 std::initializer_list<const char*> tips) {
+        auto tip = tips.begin();
+        int v = 0;
+        for (const char* n : names)
+        {
+            auto* b = arr.add (new MsButton (String::fromUTF8 (n)));
+            b->setTooltip (String::fromUTF8 (*tip++));
+            b->onClick = [this, field, v] {
+                if (proc.selected >= 0) { model.set (ids::band (proc.selected, field), (float) v); onChange(); }
+            };
+            addAndMakeVisible (b);
+            ++v;
+        }
+    };
+    choiceButtons (shapeButtons, "shape", { "TDM", "Classic" },
+                   { "Curva TDM: al subir más ancha, al bajar más estrecha",
+                     "Curva analógica clásica, simétrica: bajar es el espejo de subir" });
+    choiceButtons (resButtons, "res", { "Las dos", "Base", "Cénit" },
+                   { "Shelf analógico tal cual: resonancia en la base y en el cénit (con Q por encima de 0,71)",
+                     "Solo la resonancia de la base (lado sin tocar), como el truco del Pultec",
+                     "Solo la resonancia del cénit (lado realzado o atenuado): empujón cerca del corte sin el valle del otro lado" });
+    choiceButtons (kneeButtons, "knee", { "Recorte", "Suave", "Más suave" },
+                   { "La curva llega a la línea y se queda plana de golpe",
+                     "Codo redondeado de 1/6 de octava donde la curva toca la línea",
+                     "Ese lado sin resonancia, con la misma pendiente en fc: llega a la línea poco a poco" });
+    typeGroup = { "TIPO", {}, &typeButtons };
+    keyGroup = { "CANAL", {}, &keyButtons, true, 3 };   // separación entre L/R y M/S
+    shapeGroup = { "FORMA", {}, &shapeButtons };
+    resGroup = { "RESONANCIA", {}, &resButtons };
+    kneeGroup = { "CODO", {}, &kneeButtons };
+    addChildComponent (entry);
+
     deleteButton.setDanger (true);
     deleteButton.onClick = [this] { if (proc.selected >= 0) { model.remove (proc.selected); onChange(); } };
     addAndMakeVisible (deleteButton);
@@ -178,6 +212,19 @@ void BandPanel::refresh()
             keyButtons[k]->setLive (k != b.edit && k != eq::St && eq::modeGroup (k) == eq::modeGroup (b.edit)
                                     && eq::setIsLive (b.type, b.sets[(size_t) k]));
         }
+        for (int i = 0; i < shapeButtons.size(); ++i) shapeButtons[i]->setActive (i == b.shape);
+        for (int i = 0; i < resButtons.size(); ++i) resButtons[i]->setActive (i == b.res);
+        for (int i = 0; i < kneeButtons.size(); ++i) kneeButtons[i]->setActive (i == b.knee);
+        const bool classicShelf = b.shape == eq::ShapeClassic && (b.type == eq::LowShelf || b.type == eq::HighShelf);
+        const bool shownNow[] = { eq::typeHasGain (b.type), classicShelf, classicShelf && b.res != eq::ResBoth };
+        Group* opt[] = { &shapeGroup, &resGroup, &kneeGroup };
+        bool relayout = false;
+        for (int i = 0; i < 3; ++i) if (opt[i]->shown != shownNow[i]) { opt[i]->shown = shownNow[i]; relayout = true; }
+        // Sin resonancias con Q ≤ 0,71: resonancia y codo atenuados (como la web)
+        const float resAlpha = p.q <= std::sqrt (0.5) ? 0.45f : 1.0f;
+        for (auto* bt : resButtons) bt->setAlpha (resAlpha);
+        for (auto* bt : kneeButtons) bt->setAlpha (resAlpha);
+        if (relayout) resized();
         fc.valueText = fmt::freq (p.fc);
         gain.valueText = fmt::gain (p.gain);
         q.valueText = String (p.q, 2);
@@ -194,6 +241,8 @@ void BandPanel::resized()
     for (auto* c : std::initializer_list<Component*> { &onToggle, &deleteButton, &soloButton }) c->setVisible (hasBand);
     for (auto* bt : typeButtons) bt->setVisible (hasBand);
     for (auto* bt : keyButtons) bt->setVisible (hasBand);
+    for (Group* gr : { &shapeGroup, &resGroup, &kneeGroup })
+        for (auto* bt : *gr->buttons) bt->setVisible (hasBand && gr->shown);
     for (Row* r : { &fc, &gain, &q, &slope }) r->slider.setVisible (false);
     if (! hasBand) return;
 
@@ -205,31 +254,8 @@ void BandPanel::resized()
     onToggle.setBounds (pad + iw - 104 - 10 - 70 - 12 - 62, y, 62, 16);
     y += 28;
 
-    // Tipo y canal en la misma fila (si no caben, el canal baja)
-    typeLabel = { pad, y, 34, 15 };
-    int x = pad + 38;
-    for (auto* bt : typeButtons)
-    {
-        const int bw = bt->getButtonText().length() * 7 + 12;
-        bt->setBounds (x, y, bw, 15);
-        x += bw + 3;
-    }
-    int keysW = 0;
-    for (auto* bt : keyButtons) keysW += bt->getButtonText().length() * 7 + 12 + 3;
-    keysW += 4;
-    int kx = x + 20;
-    if (kx + 44 + keysW > pad + iw) { y += 22; kx = pad; }
-    keyLabel = { kx, y, 42, 15 };
-    kx += 46;
-    for (int k = 0; k < eq::NUM_KEYS; ++k)
-    {
-        auto* bt = keyButtons[k];
-        const int bw = bt->getButtonText().length() * 7 + 12;
-        if (k == 3) kx += 4; // separación entre L/R y M/S
-        bt->setBounds (kx, y, bw, 15);
-        kx += bw + 3;
-    }
-    y += 30;
+    // Tipo, canal, forma, resonancia y codo seguidos; si no caben, bajan de fila
+    y = flow ({ &typeGroup, &keyGroup, &shapeGroup, &resGroup, &kneeGroup }, pad, iw, y, true) + 30;
 
     // Deslizadores en fila
     fc.visible = true;
@@ -241,6 +267,95 @@ void BandPanel::resized()
     const int gap = 20, cols = 3;
     const int colW = (iw - gap * (cols - 1)) / cols;
     for (size_t i = 0; i < shown.size(); ++i) shown[i]->place (pad + (int) i * (colW + gap), y, colW);
+}
+
+static int buttonWidth (const String& text) { return text.length() * 7 + 12; }
+
+int BandPanel::flow (const std::vector<Group*>& groups, int pad, int width, int y, bool place)
+{
+    int x = pad;
+    for (auto* gr : groups)
+    {
+        if (! gr->shown) { gr->label = {}; continue; }
+        const int labelW = gr->title.length() * 7 + 2;
+        int w = labelW + 4;
+        for (int i = 0; i < gr->buttons->size(); ++i)
+            w += buttonWidth ((*gr->buttons)[i]->getButtonText()) + 3 + (i == gr->gapAfter ? 4 : 0);
+        if (x > pad && x + w > pad + width) { y += 22; x = pad; }
+        if (place)
+        {
+            gr->label = { x, y, labelW, 15 };
+            int bx = x + labelW + 4;
+            for (int i = 0; i < gr->buttons->size(); ++i)
+            {
+                auto* bt = (*gr->buttons)[i];
+                if (i == gr->gapAfter) bx += 4;
+                const int bw = buttonWidth (bt->getButtonText());
+                bt->setBounds (bx, y, bw, 15);
+                bx += bw + 3;
+            }
+        }
+        x += w + 20;
+    }
+    return y;
+}
+
+int BandPanel::preferredHeight (int width)
+{
+    // Mismos grupos que el panel, todos a la vista
+    auto make = [] (std::initializer_list<const char*> names) {
+        auto arr = std::make_unique<OwnedArray<MsButton>>();
+        for (const char* n : names) arr->add (new MsButton (String::fromUTF8 (n)));
+        return arr;
+    };
+    auto t = make ({ "Campana", "L-Shelf", "H-Shelf", "HP", "LP" }), k = make ({ "Estéreo", "L", "R", "M", "S" });
+    auto sh = make ({ "TDM", "Classic" }), rs = make ({ "Las dos", "Base", "Cénit" }), kn = make ({ "Recorte", "Suave", "Más suave" });
+    Group gt { "TIPO", {}, t.get() }, gk { "CANAL", {}, k.get(), true, 3 }, gs { "FORMA", {}, sh.get() },
+          gr { "RESONANCIA", {}, rs.get() }, gn { "CODO", {}, kn.get() };
+    const int pad = 12;
+    const int y = flow ({ &gt, &gk, &gs, &gr, &gn }, pad, width - 2 * pad, 38, false) + 30;
+    return y + 30 + 12;
+}
+
+// Doble clic en la cifra de un deslizador: escribir el valor
+void BandPanel::mouseDoubleClick (const MouseEvent& e)
+{
+    if (! hasBand) return;
+    for (Row* r : { &fc, &gain, &q, &slope })
+    {
+        if (! r->visible || r->label.isEmpty()) continue;
+        const auto valueArea = r->label.withTrimmedLeft (r->label.getWidth() / 2);
+        if (! valueArea.contains (e.getPosition())) continue;
+        const int slot = boundSlot;
+        const auto b = model.band (slot);
+        const auto& p = b.sets[(size_t) b.edit];
+        String current;
+        if (r == &fc) current = p.fc >= 1000 ? String (p.fc / 1000, 3).trimCharactersAtEnd ("0").trimCharactersAtEnd (".") + "k"
+                                             : String (p.fc, 1).trimCharactersAtEnd ("0").trimCharactersAtEnd (".");
+        else if (r == &gain) current = String (p.gain, 1);
+        else if (r == &q) current = String (p.q, 2);
+        else current = String (p.slope);
+        const String id = r->paramId;
+        Row* row = r;
+        entry.start (valueArea.withSizeKeepingCentre (valueArea.getWidth(), 18).translated (0, -2), current,
+                     [this, slot, id, row] (const String& text) {
+            double v = fmt::parseNumber (text);
+            if (! std::isfinite (v) || slot != boundSlot) return;
+            if (row == &fc) v = jlimit (ui::MAG_F_MIN, ui::MAG_F_MAX, v);
+            else if (row == &gain) v = std::round (jlimit (ui::EQ_GAIN_MIN, ui::EQ_GAIN_MAX, v) * 10) / 10;
+            else if (row == &q) v = std::round (jlimit (ui::EQ_Q_MIN, ui::EQ_Q_MAX, v) * 100) / 100;
+            else
+            {
+                int best = 0;
+                for (int i = 1; i < 4; ++i) if (std::abs (eq::SLOPES[(size_t) i] - v) < std::abs (eq::SLOPES[(size_t) best] - v)) best = i;
+                v = best;   // el parámetro de pendiente es el índice
+            }
+            model.markEdited (slot);
+            model.set (id, (float) v);
+            onChange();
+        });
+        return;
+    }
 }
 
 void BandPanel::paint (Graphics& g)
@@ -266,8 +381,8 @@ void BandPanel::paint (Graphics& g)
                 headRow.withTrimmedLeft (18).withTrimmedRight (270), Justification::centredLeft, true);
     g.setColour (theme::muted);
     g.setFont (theme::font (9.0f));
-    g.drawText ("TIPO", typeLabel, Justification::centredLeft, false);
-    g.drawText ("CANAL", keyLabel, Justification::centredLeft, false);
+    for (const Group* gr : { &typeGroup, &keyGroup, &shapeGroup, &resGroup, &kneeGroup })
+        if (gr->shown && ! gr->label.isEmpty()) g.drawText (gr->title, gr->label, Justification::centredLeft, false);
 
     const float alpha = b.sets[(size_t) b.edit].on ? 1.0f : 0.35f;
     for (const Row* row : { &fc, &gain, &q, &slope })
@@ -294,6 +409,7 @@ OutputPanel::OutputPanel (ExcellecuProcessor& p, ui::BandModel& m, std::function
     outLink.setTooltip (u8 ("Mover una ganancia mueve la otra lo mismo"));
     addAndMakeVisible (outLink);
     outLinkAtt = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "out_link", outLink);
+    addChildComponent (entry);
 
     int which = 0;
     for (OutRow* r : { &outA, &outB })
@@ -350,6 +466,41 @@ void OutputPanel::valueChanged (OutRow& r)
     }
     if (! wasDragging) { gestures (false); onChange(); }
     refresh();
+}
+
+// Doble clic en la cifra: escribir la ganancia; con «Enlazar», la otra se mueve lo mismo
+void OutputPanel::mouseDoubleClick (const MouseEvent& e)
+{
+    for (OutRow* r : { &outA, &outB })
+    {
+        const auto valueArea = r->label.withTrimmedLeft (r->label.getWidth() / 2);
+        if (! valueArea.contains (e.getPosition())) continue;
+        const int which = r->which;
+        entry.start (valueArea.withSizeKeepingCentre (valueArea.getWidth(), 18).translated (0, -2),
+                     String (outParam (outIndex (which))->convertFrom0to1 (outParam (outIndex (which))->getValue()), 1),
+                     [this, which] (const String& text) {
+            const double v = fmt::parseNumber (text);
+            if (! std::isfinite (v)) return;
+            const int me = outIndex (which), other = outIndex (1 - which);
+            auto* pm = outParam (me);
+            auto* po = outParam (other);
+            const float old = pm->convertFrom0to1 (pm->getValue());
+            const float nv = jlimit (-24.0f, 12.0f, std::round ((float) v * 10.0f) / 10.0f);
+            const bool link = proc.apvts.getRawParameterValue ("out_link")->load() > 0.5f;
+            pm->beginChangeGesture();
+            if (link) po->beginChangeGesture();
+            pm->setValueNotifyingHost (pm->convertTo0to1 (nv));
+            if (link)
+            {
+                const float ov = jlimit (-24.0f, 12.0f, std::round ((po->convertFrom0to1 (po->getValue()) + nv - old) * 10.0f) / 10.0f);
+                po->setValueNotifyingHost (po->convertTo0to1 (ov));
+                po->endChangeGesture();
+            }
+            pm->endChangeGesture();
+            onChange();
+        });
+        return;
+    }
 }
 
 void OutputPanel::refresh()
@@ -639,7 +790,8 @@ void ExcellecuEditor::resized()
     meters.setBounds (meterPanel.reduced (8).withTrimmedTop (28));
 
     // Debajo de la gráfica: la banda y la salida, una al lado de la otra
-    auto strip = body.removeFromBottom (140);
+    const int bandW = body.getWidth() - jmax (260, (int) (body.getWidth() * 0.3)) - 12;   // como bandArea, abajo
+    auto strip = body.removeFromBottom (jmax (140, BandPanel::preferredHeight (bandW)));
     body.removeFromBottom (12);
     outArea = strip.removeFromRight (jmax (260, (int) (strip.getWidth() * 0.3)));
     strip.removeFromRight (12);

@@ -59,6 +59,9 @@ enum Type { Bell = 0, LowShelf, HighShelf, HighPass, LowPass, NUM_TYPES };
 enum Key { St = 0, L, R, M, S, NUM_KEYS };           // juegos de ajustes
 enum Group { GroupSt, GroupLR, GroupMS };
 enum Role { RoleL = 0, RoleR, RoleM, RoleS };
+enum Shape { ShapeTdm = 0, ShapeClassic };
+enum Res { ResBoth = 0, ResBase, ResTop };
+enum Knee { KneeClip = 0, KneeSoft, KneeSofter };
 
 inline bool typeHasGain (int t) { return t == Bell || t == LowShelf || t == HighShelf; }
 inline bool typeHasQ (int t) { return typeHasGain (t); }
@@ -79,8 +82,15 @@ struct Band
     bool used = false;
     int type = Bell;
     int edit = St;                    // juego que se edita (y por su grupo, el modo)
+    int shape = ShapeTdm;             // forma de campanas y shelves (v0.30, web v0.27)
+    int res = ResBoth;                // resonancia de los shelves Classic (web v0.28–0.29)
+    int knee = KneeClip;              // codo de «Base» y «Cénit» (web v0.30)
     std::array<BandSet, NUM_KEYS> sets;
-    bool operator== (const Band& o) const { return used == o.used && type == o.type && edit == o.edit && sets == o.sets; }
+    bool operator== (const Band& o) const
+    {
+        return used == o.used && type == o.type && edit == o.edit && shape == o.shape && res == o.res
+            && knee == o.knee && sets == o.sets;
+    }
     bool operator!= (const Band& o) const { return ! (*this == o); }
 };
 
@@ -149,8 +159,88 @@ inline double highShelfAt (double f, double fc, double gainDb, double Q)
     return std::max (0.0, 1.0 + (peak - 1.0) * std::exp (-(d * d) / (2 * sigma * sigma)));
 }
 
-inline double bandGainAt (int type, const BandSet& p, double f)
+// ── Forma Classic (web v0.27–v0.30) ──────────────────────────────────────
+// Curvas analógicas de 2.º orden (solo la magnitud: el motor sigue siendo de fase lineal),
+// simétricas en dB. A = 10^(g/40), w = f/fc. Campana: ganancia completa en fc. Shelves: la mitad.
+inline double classicBellAt (double f, double fc, double gainDb, double Q)
 {
+    if (gainDb == 0 || f < 1) return 1;
+    const double A = std::pow (10.0, gainDb / 40), w = f / fc, x = 1 - w * w;
+    const double a = A * w / Q, b = w / (A * Q);
+    return std::sqrt ((x * x + a * a) / (x * x + b * b));
+}
+
+inline double classicLowShelfAt (double f, double fc, double gainDb, double Q)
+{
+    if (gainDb == 0 || f < 1) return gainDb == 0 ? 1 : std::pow (10.0, gainDb / 20);
+    const double A = std::pow (10.0, gainDb / 40), w = f / fc, k = A / (Q * Q) * w * w;
+    const double n = A - w * w, d = 1 - A * w * w;
+    return A * std::sqrt ((n * n + k) / (d * d + k));
+}
+
+inline double classicHighShelfAt (double f, double fc, double gainDb, double Q)
+{
+    if (gainDb == 0 || f < 1) return 1;
+    const double A = std::pow (10.0, gainDb / 40), w = f / fc, k = A / (Q * Q) * w * w;
+    const double n = 1 - A * w * w, d = A - w * w;
+    return A * std::sqrt ((n * n + k) / (d * d + k));
+}
+
+// Resonancia de los shelves Classic: con Q > 0,707 hay una en la base (lado sin tocar) y otra en
+// el cénit (lado realzado o atenuado). «Base» recorta el lado del cénit para que no pase la
+// ganancia; «Cénit» recorta el lado de la base para que no cruce 0 dB. El codo donde la curva se
+// apoya en la línea: Recorte (plana de golpe), Suave (codo de 1/6 de octava por fuera, centrado
+// donde toca la línea) o Más suave (ese lado es el shelf de Q 0,707 comprimido en frecuencia, con
+// la misma pendiente en fc). Igual que classicShelfWithRes de la web.
+inline double classicShelfWithRes (int type, double f, double fc, double gainDb, double Q, int res, int knee)
+{
+    auto fn = [type] (double ff, double c, double g, double q) {
+        return type == LowShelf ? classicLowShelfAt (ff, c, g, q) : classicHighShelfAt (ff, c, g, q);
+    };
+    const double full = fn (f, fc, gainDb, Q);
+    const double sqrtHalf = std::sqrt (0.5);
+    if (res == ResBoth || gainDb == 0 || f < 1 || Q <= sqrtHalf) return full;
+    const bool onTop = type == LowShelf ? f < fc : f > fc;
+    const bool clipSide = res == ResBase ? onTop : ! onTop;
+    if (! clipSide) return full;
+    const double g = std::pow (10.0, gainDb / 20);
+    const bool up = gainDb > 0;
+    if (knee == KneeClip)
+    {
+        if (res == ResBase) return up ? std::min (full, g) : std::max (full, g);
+        return up ? std::max (full, 1.0) : std::min (full, 1.0);
+    }
+    const double A = std::pow (10.0, gainDb / 40);
+    if (knee == KneeSofter)
+    {
+        const double a = (A * A + 1) / ((A - 1) * (A - 1) + A / (Q * Q));   // pendiente en fc: Q / Q 0,707
+        return fn (std::min (1e9, fc * std::pow (f / fc, a)), fc, gainDb, sqrtHalf);
+    }
+    // Suave. x = distancia en dB a la línea, positiva hacia dentro; t = octavas desde fc hacia ese lado
+    const double sg = up ? 1.0 : -1.0;
+    auto xAt = [&] (double t) {
+        const double ff = fc * std::pow (2.0, type == LowShelf ? (onTop ? -t : t) : (onTop ? t : -t));
+        const double y = 20 * std::log10 (fn (ff, fc, gainDb, Q));
+        return res == ResBase ? sg * (gainDb - y) : sg * y;
+    };
+    const double t0 = 0.5 * std::log2 ((A * A + 1) / (A * (2 - 1 / (Q * Q))));
+    const double d = 1e-4, m = (xAt (t0 - d) - xAt (t0 + d)) / (2 * d);
+    const double k = std::min (m * (1.0 / 12), std::abs (gainDb) / 2);
+    const double t = std::abs (std::log2 (f / fc));
+    const double yFull = 20 * std::log10 (full);
+    const double x = t >= t0 ? -m * (t - t0) : (res == ResBase ? sg * (gainDb - yFull) : sg * yFull);
+    const double xs = x >= k ? x : x <= -k ? 0 : (x + k) * (x + k) / (4 * k);
+    const double yDb = res == ResBase ? gainDb - sg * xs : sg * xs;
+    return std::pow (10.0, yDb / 20);
+}
+
+inline double bandGainAt (int type, const BandSet& p, double f, int shape = ShapeTdm, int res = ResBoth, int knee = KneeClip)
+{
+    if (shape == ShapeClassic)
+    {
+        if (type == Bell) return classicBellAt (f, p.fc, p.gain, p.q);
+        if (type == LowShelf || type == HighShelf) return classicShelfWithRes (type, f, p.fc, p.gain, p.q, res, knee);
+    }
     switch (type)
     {
         case Bell:      return gaussianAt (f, p.fc, p.gain, p.q);
@@ -184,10 +274,18 @@ inline int clampKey (int k) { return k < St ? St : (k > S ? S : k); }
 
 // Escuchar banda: la forma de lo que hace la banda, de 0 a 1, sin su ganancia. Campana → pasa
 // banda gaussiano; shelf → su transición (1 en la zona realzada o atenuada); HPF / LPF → lo que
-// recortan. Una banda a 0 dB o apagada también suena con su forma.
-inline double soloShapeAt (int type, const BandSet& s, double f)
+// recortan. Una banda a 0 dB o apagada también suena con su forma. Forma Classic: lo que la
+// curva se aparta de 0 dB en proporción a su ganancia (12 dB de referencia si está a 0 dB), hasta 1.
+inline double soloShapeAt (int type, const BandSet& s, double f, int shape = ShapeTdm, int res = ResBoth, int knee = KneeClip)
 {
     if (f < 1) return type == HighPass ? 1.0 : 0.0;
+    if (shape == ShapeClassic && typeHasGain (type))
+    {
+        BandSet r = s;
+        if (r.gain == 0) r.gain = 12;
+        const double db = 20 * std::log10 (bandGainAt (type, r, f, shape, res, knee));
+        return std::min (1.0, std::abs (db) / std::abs (r.gain));
+    }
     const double sigma = (1.0 / s.q) * std::log10 (2.0) / 2.0;
     const double d = std::log10 (f) - std::log10 (s.fc);
     const double gauss = std::exp (-(d * d) / (2 * sigma * sigma));
@@ -230,7 +328,7 @@ inline void responseAt (const Params& p, int role, const double* freqs, int coun
         bool isSolo = false, silent = false;
         soloRoles (key, role, isSolo, silent);
         for (int i = 0; i < count; ++i)
-            g[i] = isSolo ? soloShapeAt (b.type, b.sets[(size_t) key], freqs[i]) : (silent ? 0.0 : 1.0);
+            g[i] = isSolo ? soloShapeAt (b.type, b.sets[(size_t) key], freqs[i], b.shape, b.res, b.knee) : (silent ? 0.0 : 1.0);
         return;
     }
     for (int i = 0; i < count; ++i) g[i] = 1.0;
@@ -239,7 +337,7 @@ inline void responseAt (const Params& p, int role, const double* freqs, int coun
         if (! b.used) continue;
         const BandSet* s = activeSet (b, role);
         if (s == nullptr || ! setIsLive (b.type, *s)) continue;
-        for (int i = 0; i < count; ++i) g[i] *= bandGainAt (b.type, *s, freqs[i]);
+        for (int i = 0; i < count; ++i) g[i] *= bandGainAt (b.type, *s, freqs[i], b.shape, b.res, b.knee);
     }
 }
 

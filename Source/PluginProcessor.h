@@ -136,7 +136,12 @@ private:
     std::atomic<int> soloSlot { -1 }, soloKey { eq::St };   // valores del último preset cargado (para "modificado")
 
     struct SetPtrs { std::atomic<float>* on; std::atomic<float>* fc; std::atomic<float>* gain; std::atomic<float>* q; std::atomic<float>* slope; };
-    struct BandPtrs { std::atomic<float>* used; std::atomic<float>* type; std::atomic<float>* edit; std::array<SetPtrs, eq::NUM_KEYS> sets; };
+    struct BandPtrs
+    {
+        std::atomic<float>* used; std::atomic<float>* type; std::atomic<float>* edit;
+        std::atomic<float>* shape; std::atomic<float>* res; std::atomic<float>* knee;
+        std::array<SetPtrs, eq::NUM_KEYS> sets;
+    };
     std::array<BandPtrs, eq::MAX_BANDS> ptrs {};
 
     eq::Engine engine;

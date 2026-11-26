@@ -5,6 +5,7 @@
 #include "ui/Meters.h"
 #include "ui/PresetBar.h"
 #include "ui/Theme.h"
+#include "ui/ValueEntry.h"
 #include "ui/Views.h"
 
 // Fila de "chips" con las bandas (clic = seleccionar). Va en la cabecera de la gráfica.
@@ -41,23 +42,33 @@ public:
     BandPanel (ExcellecuProcessor&, ui::BandModel&, std::function<void()> onChange);
     void paint (juce::Graphics&) override;
     void resized() override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
     void refresh();
+    // Alto que necesita con todas las filas a la vista (para no mover la gráfica al cambiar de banda)
+    static int preferredHeight (int width);
 
 private:
     struct Row : SliderRow { std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> att; juce::String paramId; };
+    // Grupo de botones con su etiqueta: tipo, canal, forma, resonancia, codo
+    struct Group { juce::String title; juce::Rectangle<int> label; juce::OwnedArray<MsButton>* buttons; bool shown = true; int gapAfter = -1; };
     void bindBand();
+    // Coloca los grupos seguidos, bajando de fila si no caben. Con place = false solo mide.
+    // Devuelve la y de la última fila.
+    static int flow (const std::vector<Group*>& groups, int pad, int width, int y, bool place);
 
     ExcellecuProcessor& proc;
     ui::BandModel& model;
     std::function<void()> onChange;
     juce::ToggleButton onToggle { "Activa" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAtt;
-    juce::OwnedArray<MsButton> typeButtons, keyButtons;
+    juce::OwnedArray<MsButton> typeButtons, keyButtons, shapeButtons, resButtons, kneeButtons;
+    Group typeGroup, keyGroup, shapeGroup, resGroup, kneeGroup;
+    ValueEntry entry;
     MsButton deleteButton { "Eliminar banda" }, soloButton { "Escuchar" };
     Row fc, gain, q, slope;
     int boundSlot = -2, boundKey = -1, boundType = -1;
     bool hasBand = false;
-    juce::Rectangle<int> headRow, typeLabel, keyLabel;
+    juce::Rectangle<int> headRow;
 };
 
 // Ganancia de salida: L/R o M/S, enlace
@@ -71,6 +82,7 @@ public:
 
 private:
     struct OutRow : SliderRow { int which = 0; };
+    void mouseDoubleClick (const juce::MouseEvent&) override;
     void valueChanged (OutRow&);
     void gestures (bool begin);
     int outIndex (int which) const;   // which 0/1 → índice 0..3 (L, R, Mid, Side) según el modo
@@ -88,6 +100,7 @@ private:
     float start[4] {};
     juce::String noteText;
     juce::Rectangle<int> title, note;
+    ValueEntry entry;
 };
 
 class ExcellecuEditor : public juce::AudioProcessorEditor, private juce::Timer
