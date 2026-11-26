@@ -175,6 +175,19 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
 ## Pendiente / ideas
 
 - Quitar la fase plegada de la web al final del desarrollo.
+- **Frecuencia hasta 30 kHz** (pedido el 26/11, como el Pro-Q): poder poner un punto más allá de
+  20 kHz para definir mejor la curva en agudos (de un shelf a 30 kHz solo suena la parte de debajo
+  de Nyquist, más suave). Supone: rango de `fc` (¿también desde 10 Hz?), eje de la gráfica más
+  allá de 20 kHz, límites en `BandModel`, presets y web. Ojo: cambia el valor normalizado de `fc`,
+  así que la automatización ya grabada de frecuencias se movería (las sesiones guardan el valor
+  real y no se ven afectadas). Sin cambios en el motor.
+- **Escuchar banda (solo)** (pedido el 26/11): oír solo lo que hace la banda seleccionada. Idea:
+  con el solo activo, el motor sustituye la respuesta por la forma de esa banda normalizada,
+  S(f) = |G(f) − 1| / máx |G − 1| (campana → pasa banda gaussiano; shelf → su transición; HPF/LPF
+  → lo que recortan; si la ganancia es 0 dB, la forma como si tuviera ganancia), en su canal
+  (Estéreo, L, R, M o S; el resto en silencio). Encaja en `responseAt` con un campo de solo en
+  `Params`; el fundido de 2048 muestras evita clics. Estado no guardado en la sesión y aviso
+  visible ("SOLO") para que no se cuele en un bounce. En la web, con un ConvolverNode en directo.
 - Confirmar el canal de la banda 3 de la TDM (Side o Mid).
 
 - EQ: codo suave en HPF/LPF; filtro de 16 384 a 88,2/96 kHz; modo de fase mínima opcional.
