@@ -187,6 +187,13 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
 - Prueba de humo (latencia, +6 dB, L/R, M/S, HP/LP −48 dB, cambio de tipo, 12 bandas, estado,
   mono, capturas) y pluginval nivel 5.
 
+## Forma de trabajar (acordado el 26/11/2026)
+
+- No compilar el plugin por cualquier cambio: las ideas se prueban primero en el HTML.
+- Los cambios del plugin se acumulan en la rama `trabajo` (sin GitHub Actions) y pasan a `main`,
+  que es lo que compila, solo cuando Javier lo pide.
+- Los cambios que solo tocan documentación o el HTML y van a `main` llevan `[skip ci]`.
+
 ## Diferencias con la web
 
 - Sin carga de archivo / reproducción / exportación.
