@@ -80,6 +80,41 @@ const hz = await page.evaluate(() => {
 });
 check(Math.abs(hz.fc - 30000) < 1 && Math.abs(hz.fcMax - 30000) < 1, 'puntos hasta 30 kHz (gráfica y deslizador)');
 
+// ── v0.27: formas TDM / Classic y escribir valores ──
+const sh = await page.evaluate(() => {
+  const b = makeBand('bell', { fc: 1000, gain: 6, q: 1 }); bands.push(b); selectedId = b.id; syncPanel(); updateCharts();
+  const at = (f, g) => { b.sets.st.gain = g; return 20 * Math.log10(bandGainAt('bell', b.sets.st, f, b.shape)); };
+  const tdmUp = at(1500, 6), tdmDown = at(1500, -6);
+  document.getElementById('bps-classic').click();
+  const clsUp = at(1500, 6), clsDown = at(1500, -6), clsPeak = at(1000, 6);
+  b.sets.st.gain = 6;
+  const xml = presetXml('x', { bands, out: outGain });
+  const back = parsePresetXml(xml);
+  const shapeBack = back.bands[back.bands.length - 1].shape;
+  return { tdmUp, tdmDown, clsUp, clsDown, clsPeak, shapeBack, active: document.getElementById('bps-classic').classList.contains('ms-active'), id: b.id };
+});
+check(sh.active && Math.abs(sh.clsPeak - 6) < 1e-9, 'forma Classic: +6 dB en la frecuencia del punto');
+check(Math.abs(sh.clsUp + sh.clsDown) < 1e-9, 'Classic simétrica: a 1,5 kHz +' + sh.clsUp.toFixed(2) + ' / ' + sh.clsDown.toFixed(2) + ' dB');
+check(sh.tdmUp > -sh.tdmDown + 0.2, 'TDM asimétrica (subir más ancho que bajar): +' + sh.tdmUp.toFixed(2) + ' / ' + sh.tdmDown.toFixed(2) + ' dB');
+check(sh.shapeBack === 'classic', 'la forma se guarda en el preset');
+// Escribir valores: doble clic en la cifra, escribir, Intro
+const typeInto = async (id, text) => {
+  await page.dblclick('#' + id);
+  await page.fill('#' + id + ' input', text);
+  await page.press('#' + id + ' input', 'Enter');
+  await page.waitForTimeout(30);
+};
+await typeInto('lbl-bpfc', '1,55k');
+await typeInto('lbl-bpgain', '-2,5');
+await typeInto('lbl-bpq', '0.7');
+const typed = await page.evaluate(() => { const p = editSet(selBand()); return { fc: p.fc, gain: p.gain, q: p.q, lbl: document.getElementById('lbl-bpfc').textContent }; });
+check(Math.abs(typed.fc - 1550) < 1e-6 && typed.gain === -2.5 && typed.q === 0.7, 'escribir valores: 1,55k → ' + typed.fc + ' Hz, −2,5 dB, Q 0,7 (' + typed.lbl + ')');
+await page.dblclick('#lbl-bpgain');
+await page.fill('#lbl-bpgain input', '9');
+await page.press('#lbl-bpgain input', 'Escape');
+check(await page.evaluate(() => editSet(selBand()).gain === -2.5), 'Esc cancela lo escrito');
+await page.evaluate((id) => { deleteBand(id); commitHistory(); }, sh.id);
+
 // ── salida ──
 await page.click('#out-ms');
 await page.$eval('#sl-out-b', el => { el.dispatchEvent(new Event('pointerdown')); el.value = 2; el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change', { bubbles: true })); });

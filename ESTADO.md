@@ -21,6 +21,20 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
 - **Cifra de RMS en los medidores** (plugin y web v0.26), bajo la del pico máximo: modo elegido
   (AES-17 o sin ponderar), canal más alto, refrescada 4 veces por segundo para poder leerla.
   Pruebas de humo y de Chrome.
+- **Web v0.27 (solo en la web, para probar antes de pasarlo al plugin):**
+  - **Forma por punto: TDM (la gaussiana de siempre) o Classic** (analógica de 2.º orden, solo
+    magnitud, simétrica en dB; campana con la ganancia completa en fc y shelves con la mitad en
+    fc, fórmulas RBJ analógicas). En campanas y shelves; HPF/LPF sin cambio. Puntos nuevos en TDM;
+    presets y sesiones antiguos, TDM. Selector «Forma» en el panel de la banda y en el clic derecho.
+    Preset: `b{n}_shape` (0 TDM, 1 Classic). Nombre «TDM» decidido por Javier (no «Gauss»).
+    Con Q 1, al subir las dos tienen casi el mismo ancho cerca del pico (+3,53 / +3,52 dB a media
+    octava), pero Classic tiene faldas largas (+0,7 dB dos octavas más allá) y TDM cae enseguida;
+    al bajar, TDM es más estrecha (−2,52 frente a −3,52 dB a media octava).
+  - **Escribir valores:** doble clic en la cifra de frecuencia, ganancia, Q, pendiente o ganancia
+    de salida, se escribe y Intro (o salir del campo) aplica; Esc cancela. Acepta «1,55k»,
+    «1500 Hz», «-2,5 dB». Con «Enlazar», la otra ganancia de salida se mueve lo mismo.
+  - Al pasarlo al plugin: parámetro de forma por banda (y en `Params`/`bandGainAt` del motor C++,
+    igual que la web para la comparación), selector y menú, y etiquetas editables con doble clic.
 
 ## v0.25 (26/11/2026): bypass alineado, menos CPU, letra legible y analizador en la web
 

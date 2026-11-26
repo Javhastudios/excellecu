@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EQ Motor DFT — Prototipo v0.26</title>
+<title>EQ Motor DFT — Prototipo v0.27</title>
 <style>
   :root {
     --bg: #0e0e10;
@@ -128,6 +128,10 @@
   .motor-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 20px; }
   .phase-box summary { cursor: pointer; list-style: none; margin-bottom: 0; }
   .phase-box[open] summary { margin-bottom: 8px; }
+  .val-edit { cursor: text; border-bottom: 0.5px dotted transparent; }
+  .val-edit:hover { border-bottom-color: currentColor; }
+  .val-input { width: 76px; font: inherit; color: var(--text); background: var(--bg); border: 0.5px solid var(--accent);
+               border-radius: 3px; padding: 0 4px; text-align: right; outline: none; }
   .rms-sel { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
   .rms-sel .ms-btn { width: 100%; padding: 2px 0; }
   /* v0.21: barra de presets y deshacer, salida, medidores */
@@ -279,7 +283,7 @@
 </head>
 <body>
 
-<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.26</h1>
+<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.27</h1>
 
 <div class="modules">
 
@@ -363,6 +367,10 @@
                 </div>
                 <div class="type-canal">
                   <div class="ms-row type-row" id="bp-types"></div>
+                  <div class="ms-row" id="bp-shape-row"><span class="ms-lbl">Forma</span>
+                    <button class="ms-btn" id="bps-tdm" title="Curva TDM: al subir más ancha, al bajar más estrecha">TDM</button>
+                    <button class="ms-btn" id="bps-classic" title="Curva analógica clásica, simétrica: bajar es el espejo de subir">Classic</button>
+                  </div>
                   <div class="ms-row"><span class="ms-lbl">Canal</span>
                     <button class="ms-btn" id="bp-st" title="Mismo ajuste en L y R">Estéreo</button>
                     <button class="ms-btn" id="bp-l" title="Canal izquierdo">L</button><button class="ms-btn" id="bp-r" title="Canal derecho">R</button><span style="width:4px"></span><button class="ms-btn" id="bp-m" title="Mid">M</button><button class="ms-btn" id="bp-s" title="Side">S</button>
@@ -543,7 +551,7 @@ function makeBand(type, params = {}) {
   const used = new Set(bands.map(b => b.color));
   const color = BAND_COLORS.find(c => !used.has(c)) || BAND_COLORS[bands.length % BAND_COLORS.length];
   return {
-    id: nextBandId++, type, color, edit: 'st', lrFresh: true,
+    id: nextBandId++, type, color, edit: 'st', lrFresh: true, shape: 'tdm',
     sets: {
       st: { ...base }, l: { ...base }, r: { ...base },
       m:  { ...base, on: t.gain, gain: 0 },
@@ -652,6 +660,29 @@ function highShelfAt(f, fc, gainDb, Q) {
   return Math.max(0, 1.0 + (peak - 1.0) * Math.exp(-(d * d) / (2 * sigma * sigma)));
 }
 
+// ── Forma Classic (v0.27) ─────────────────────────────────────────────
+// Curvas analógicas de 2.º orden (solo la magnitud: el motor sigue siendo de fase lineal),
+// simétricas en dB: −12 dB es el espejo de +12 dB, como en la mayoría de EQ. A = 10^(g/40),
+// w = f/fc. Campana: ganancia completa en fc. Shelves: la mitad de la ganancia (en dB) en fc.
+// La forma TDM (gaussiana, arriba) es la propia de Excellecu: al subir es más ancha y al
+// bajar más estrecha.
+function classicBellAt(f, fc, gainDb, Q) {
+  if (gainDb === 0 || f < 1) return 1;
+  const A = Math.pow(10, gainDb / 40), w = f / fc, x = 1 - w * w;
+  return Math.sqrt((x * x + Math.pow(A * w / Q, 2)) / (x * x + Math.pow(w / (A * Q), 2)));
+}
+function classicLowShelfAt(f, fc, gainDb, Q) {
+  if (gainDb === 0 || f < 1) return gainDb === 0 ? 1 : Math.pow(10, gainDb / 20);
+  const A = Math.pow(10, gainDb / 40), w = f / fc, k = A / (Q * Q) * w * w;
+  return A * Math.sqrt((Math.pow(A - w * w, 2) + k) / (Math.pow(1 - A * w * w, 2) + k));
+}
+function classicHighShelfAt(f, fc, gainDb, Q) {
+  if (gainDb === 0 || f < 1) return 1;
+  const A = Math.pow(10, gainDb / 40), w = f / fc, k = A / (Q * Q) * w * w;
+  return A * Math.sqrt((Math.pow(1 - A * w * w, 2) + k) / (Math.pow(A - w * w, 2) + k));
+}
+const SHAPES = { tdm: 'TDM', classic: 'Classic' };
+
 // ── Modos de canal ───────────────────────────────────────────────────
 // Roles de canal: 'l', 'r' (etapa 1, dominio L/R) y 'm', 's' (etapa 2, dominio M/S).
 // Las bandas en Estéreo actúan en la etapa 1 sobre L y R por igual.
@@ -671,7 +702,14 @@ function setIsLive(b, p) {
 }
 
 // Ganancia lineal de una banda con un juego concreto, en una frecuencia
-function bandGainAt(type, p, f) {
+function bandGainAt(type, p, f, shape) {
+  if (shape === 'classic') {
+    switch (type) {
+      case 'bell': return classicBellAt(f, p.fc, p.gain, p.q);
+      case 'ls':   return classicLowShelfAt(f, p.fc, p.gain, p.q);
+      case 'hs':   return classicHighShelfAt(f, p.fc, p.gain, p.q);
+    }
+  }
   switch (type) {
     case 'bell': return gaussianAt(f, p.fc, p.gain, p.q);
     case 'ls':   return lowShelfAt(f, p.fc, p.gain, p.q);
@@ -688,7 +726,7 @@ function responseAt(freqs, role) {
   for (const b of bands) {
     const p = activeSet(b, role);
     if (!p || !setIsLive(b, p)) continue;
-    for (let i = 0; i < freqs.length; i++) g[i] *= bandGainAt(b.type, p, freqs[i]);
+    for (let i = 0; i < freqs.length; i++) g[i] *= bandGainAt(b.type, p, freqs[i], b.shape);
   }
   return g;
 }
@@ -697,7 +735,7 @@ function responseAt(freqs, role) {
 function bandResponseAt(b, key, freqs) {
   const p = b.sets[key], g = new Float64Array(freqs.length).fill(1.0);
   if (!setIsLive(b, p)) return g;
-  for (let i = 0; i < freqs.length; i++) g[i] = bandGainAt(b.type, p, freqs[i]);
+  for (let i = 0; i < freqs.length; i++) g[i] = bandGainAt(b.type, p, freqs[i], b.shape);
   return g;
 }
 
@@ -1757,6 +1795,9 @@ function initHandleEvents() {
       openCtxMenu(e.clientX, e.clientY, [
         { title: `Banda ${bandIndex(b)} · tipo` },
         ...TYPE_ORDER.map(t => ({ label: BAND_TYPES[t].label, active: b.type === t, action: () => setBandType(b.id, t) })),
+        ...(BAND_TYPES[b.type].gain ? [{ sep: true }, { title: 'Forma' },
+            ...Object.keys(SHAPES).map(sh => ({ label: SHAPES[sh], active: (b.shape || 'tdm') === sh,
+                                                action: () => { b.shape = sh; syncPanel(); updateCharts(); } }))] : []),
         { sep: true },
         { label: editSet(b).on ? 'Apagar' : 'Encender', action: () => { editSet(b).on = !editSet(b).on; markEdited(b); syncPanel(); updateCharts(); } },
         { label: 'Eliminar', hint: 'Supr', danger: true, action: () => deleteBand(b.id) },
@@ -1992,6 +2033,9 @@ function syncPanel() {
   $id('bp-controls').style.opacity = p.on ? '1' : '0.35';
 
   TYPE_ORDER.forEach(k => $id('bpt-' + k).classList.toggle('ms-active', k === b.type));
+  $id('bp-shape-row').style.display = t.gain ? '' : 'none';
+  $id('bps-tdm').classList.toggle('ms-active', (b.shape || 'tdm') === 'tdm');
+  $id('bps-classic').classList.toggle('ms-active', b.shape === 'classic');
   ['st','l','r','m','s'].forEach(m => {
     const btn = $id('bp-' + m);
     btn.classList.toggle('ms-active', m === b.edit);
@@ -2044,6 +2088,10 @@ function initPanel() {
     editSet(b).on = this.checked; markEdited(b); syncPanel(); updateCharts();
   });
   $id('bp-del').addEventListener('click', () => { if (selBand()) deleteBand(selectedId); });
+  ['tdm', 'classic'].forEach(sh => $id('bps-' + sh).addEventListener('click', () => {
+    const b = selBand(); if (!b) return;
+    b.shape = sh; syncPanel(); updateCharts();
+  }));
 
   // Sliders → juego editado de la banda seleccionada
   const bind = (id, fn) => $id(id).addEventListener('input', function() {
@@ -2318,6 +2366,79 @@ function initAnalyzer() {
   syncAnaButtons();
 }
 
+
+// ── Escribir valores con el teclado (v0.27) ───────────────────────────
+// Doble clic sobre la cifra de un control → se escribe el valor → Intro (o salir del campo) lo
+// aplica, Esc cancela. Acepta coma o punto decimal y sufijos: «1,5k», «1500 Hz», «-2.5 dB».
+function parseNumber(text) {
+  let t = String(text).trim().toLowerCase().replace(',', '.').replace(/\s+/g, '');
+  let mult = 1;
+  t = t.replace(/(hz|db|dB|\/oct|oct)$/i, '');
+  if (t.endsWith('khz')) { t = t.slice(0, -3); mult = 1000; }
+  else if (t.endsWith('k')) { t = t.slice(0, -1); mult = 1000; }
+  const v = parseFloat(t);
+  return isFinite(v) ? v * mult : NaN;
+}
+
+function startValueEdit(span, current, apply) {
+  if (span.querySelector('input')) return;
+  const prev = span.textContent;
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.className = 'val-input'; inp.value = current;
+  span.textContent = '';
+  span.appendChild(inp);
+  inp.focus(); inp.select();
+  let done = false;
+  const finish = ok => {
+    if (done) return;
+    done = true;
+    const v = parseNumber(inp.value);
+    span.textContent = prev;
+    if (ok && isFinite(v)) apply(v);
+  };
+  inp.addEventListener('keydown', e => {
+    e.stopPropagation();   // que Supr, Ctrl+Z, etc. no actúen sobre la gráfica mientras se escribe
+    if (e.key === 'Enter') { finish(true); commitHistory(); }
+    else if (e.key === 'Escape') finish(false);
+  });
+  inp.addEventListener('blur', () => { finish(true); commitHistory(); });
+}
+
+function initValueEntry() {
+  const bandField = (id, current, apply) => {
+    const span = $id(id);
+    span.classList.add('val-edit');
+    span.title = 'Doble clic para escribir el valor';
+    span.addEventListener('dblclick', () => {
+      const b = selBand(); if (!b) return;
+      startValueEdit(span, current(editSet(b)), v => { apply(editSet(b), v); markEdited(b); syncPanel(); updateCharts(); });
+    });
+  };
+  bandField('lbl-bpfc', p => p.fc >= 1000 ? +(p.fc / 1000).toFixed(3) + 'k' : +p.fc.toFixed(1),
+            (p, v) => { p.fc = Math.min(MAG_F_MAX, Math.max(MAG_F_MIN, v)); });
+  bandField('lbl-bpgain', p => p.gain.toFixed(1),
+            (p, v) => { p.gain = Math.round(Math.min(EQ_GAIN_MAX, Math.max(EQ_GAIN_MIN, v)) * 10) / 10; });
+  bandField('lbl-bpq', p => p.q.toFixed(2),
+            (p, v) => { p.q = roundQ(Math.min(EQ_Q_MAX, Math.max(EQ_Q_MIN, v))); });
+  bandField('lbl-bpslope', p => String(p.slope),
+            (p, v) => { p.slope = SLOPES.reduce((a, c) => Math.abs(c - v) < Math.abs(a - v) ? c : a, SLOPES[0]); });
+  // Salida: con «Enlazar», la otra ganancia se mueve lo mismo
+  [['lbl-out-a', 0], ['lbl-out-b', 1]].forEach(([id, which]) => {
+    const span = $id(id);
+    span.classList.add('val-edit');
+    span.title = 'Doble clic para escribir el valor';
+    span.addEventListener('dblclick', () => {
+      const keys = outKeys(), me = keys[which], other = keys[1 - which];
+      startValueEdit(span, outGain[me].toFixed(1), v => {
+        const nv = clampOut(v), d = nv - outGain[me];
+        outGain[me] = nv;
+        if (outGain.link) outGain[other] = clampOut(outGain[other] + d);
+        syncOut(); updateOutLive();
+      });
+    });
+  });
+}
+
 // ── Medidores ────────────────────────────────────────────────────────
 // Durante la reproducción: entrada = archivo original, salida = lo que suena (procesado con la
 // ganancia de salida, o el original si se reproduce el original). Pico con caída de 20 dB/s,
@@ -2589,7 +2710,8 @@ function presetXml(name, st) {
   st.bands.slice(0, MAX_BANDS).forEach((b, i) => {
     const n = i + 1;
     if (!b.lrFresh) fresh &= ~(1 << i);
-    body += P(`b${n}_used`, 1) + P(`b${n}_type`, TYPE_ORDER.indexOf(b.type)) + P(`b${n}_edit`, KEYS.indexOf(b.edit));
+    body += P(`b${n}_used`, 1) + P(`b${n}_type`, TYPE_ORDER.indexOf(b.type)) + P(`b${n}_edit`, KEYS.indexOf(b.edit))
+          + P(`b${n}_shape`, b.shape === 'classic' ? 1 : 0);
     for (const k of KEYS) {
       const p = b.sets[k];
       body += P(`b${n}_${k}_on`, p.on ? 1 : 0) + P(`b${n}_${k}_fc`, p.fc) + P(`b${n}_${k}_gain`, p.gain)
@@ -2599,7 +2721,7 @@ function presetXml(name, st) {
   const o = st.out;
   body += P('out_mode', o.mode === 'ms' ? 1 : 0) + P('out_link', o.link === false ? 0 : 1)
         + P('out_l', o.l) + P('out_r', o.r) + P('out_m', o.m) + P('out_s', o.s);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.26" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.27" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
 }
 
 // XML → estado. Lo que falta toma el valor por defecto del plugin; lo desconocido se ignora.
@@ -2619,6 +2741,7 @@ function parsePresetXml(text) {
     const type = TYPE_ORDER[Math.min(4, Math.max(0, Math.round(get(`b${n}_type`, 0))))] || 'bell';
     const b = makeBand(type);
     b.edit = KEYS[Math.min(4, Math.max(0, Math.round(get(`b${n}_edit`, 0))))];
+    b.shape = get(`b${n}_shape`, 0) > 0.5 ? 'classic' : 'tdm';   // presets antiguos: TDM
     b.lrFresh = ((fresh >> i) & 1) === 1;
     for (const k of KEYS) {
       b.sets[k] = {
@@ -2660,7 +2783,7 @@ function applyPresetState(st, name) {
   const keepOut = { mode: outGain.mode, link: outGain.link };
   bands = []; nextBandId = 1;
   // Se recrean con makeBand para que los colores salgan en orden
-  for (const sb of st.bands) { const b = makeBand(sb.type); b.edit = sb.edit; b.lrFresh = sb.lrFresh; b.sets = JSON.parse(JSON.stringify(sb.sets)); bands.push(b); }
+  for (const sb of st.bands) { const b = makeBand(sb.type); b.edit = sb.edit; b.lrFresh = sb.lrFresh; b.shape = sb.shape || 'tdm'; b.sets = JSON.parse(JSON.stringify(sb.sets)); bands.push(b); }
   Object.assign(outGain, keepOut, st.out);
   selectedId = null;
   presetName = name;
@@ -2767,6 +2890,7 @@ setEngine(engine);
 initHandleEvents();
 initOut();
 initZoom();
+initValueEntry();
 initAnalyzer();
 initMeters();
 initPresets();
