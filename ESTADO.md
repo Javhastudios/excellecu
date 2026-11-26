@@ -35,6 +35,13 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
   1,5 / 3 / 4,5 dB/oct alrededor de 1 kHz (0 por defecto). Se recuerda en el navegador. Prueba en
   Chrome: seno de 1 kHz leído en −3,10 dBFS (esperado −3,10), Post con salida +2,04 dB.
   Para el plugin habrá que alinear la entrada con la salida (retrasada la latencia).
+- **Legibilidad (web v0.25 y plugin):** costaba leer las letras (comparado con FabFilter). Letra
+  normal sin serifa en vez de monoespaciada (cifras de ancho fijo en la web con
+  `tabular-nums`), 2 px más grande en todo (8–11 px → 10–13 px), gris de etiquetas más claro
+  (`#6b6b7e` → `#a0a0b4`) y cifras de la gráfica más visibles (opacidad 0,2 → 0,55). En la web,
+  la cabecera de la gráfica pasa a dos filas si no cabe y la columna de nivel se ensancha a 112 px.
+  En el plugin, `theme::font` suma 2 px y usa la letra sin serifa del sistema; botones y chips
+  algo más anchos.
 
 ## v0.23 (26/11/2026): puntos hasta 30 kHz y escuchar banda
 

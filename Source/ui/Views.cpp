@@ -25,7 +25,7 @@ void freqGrid (Graphics& g, float l, float r, float t, float bottom, float W)
         const float x = l + (float) ((std::log10 ((double) f) - lMin) / (lMax - lMin)) * pw;
         g.setColour (Colours::white.withAlpha (0.05f));
         g.drawLine (x, t, x, bottom, 0.5f);
-        g.setColour (Colours::white.withAlpha (0.2f));
+        g.setColour (Colours::white.withAlpha (0.55f));
         g.setFont (theme::font (9.0f));
         g.drawText (f >= 1000 ? String (f / 1000) + "k" : String (f), Rectangle<float> (x - 20, bottom + 4, 40, 12), Justification::centred, false);
     }
@@ -240,7 +240,7 @@ void MagChart::paint (Graphics& g)
         const float y = G.toY (db);
         g.setColour (Colours::white.withAlpha (db == 0 ? 0.15f : 0.05f));
         g.drawLine (G.l, y, G.W - G.r, y, db == 0 ? 1.0f : 0.5f);
-        g.setColour (Colours::white.withAlpha (0.2f));
+        g.setColour (Colours::white.withAlpha (0.55f));
         g.setFont (theme::font (9.0f));
         g.drawText ((db > 0 ? "+" : "") + String (db) + "dB", Rectangle<float> (0, y - 6, G.l - 3, 12), Justification::centredRight, false);
     }
@@ -594,7 +594,7 @@ void PhaseView::paint (Graphics& g)
         const float y = t + ph / 2 - (float) deg / 180.0f * (ph / 2);
         g.setColour (Colours::white.withAlpha (deg == 0 ? 0.15f : 0.05f));
         g.drawLine (l, y, W - r, y, deg == 0 ? 1.0f : 0.5f);
-        g.setColour (Colours::white.withAlpha (0.2f));
+        g.setColour (Colours::white.withAlpha (0.55f));
         g.setFont (theme::font (9.0f));
         g.drawText (String (deg) + u8 ("°"), Rectangle<float> (0, y - 6, l - 3, 12), Justification::centredRight, false);
     }

@@ -13,7 +13,7 @@ inline const Colour accent { 0xff7c6af7 };
 inline const Colour accent2 { 0xff3ecfa3 };
 inline const Colour warn { 0xfff7a23e };
 inline const Colour text { 0xffe8e8f0 };
-inline const Colour muted { 0xff6b6b7e };
+inline const Colour muted { 0xffa0a0b4 };   // v0.25: más contraste (antes 0xff6b6b7e)
 // Colores de cada sección
 inline const Colour eq2 { 0xffff6464 };
 inline const Colour ls { 0xff7c6af7 };
