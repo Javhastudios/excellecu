@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EQ Motor DFT — Prototipo v0.23</title>
+<title>EQ Motor DFT — Prototipo v0.24</title>
 <style>
   :root {
     --bg: #0e0e10;
@@ -275,7 +275,7 @@
 </head>
 <body>
 
-<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.23</h1>
+<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.24</h1>
 
 <div class="modules">
 
@@ -331,6 +331,12 @@
           <div class="mag-box">
             <div class="panel-title" style="display:flex;align-items:center;gap:4px">Magnitud
               <div class="zoom-bar" id="zoom-bar"><span class="ms-lbl">Escala</span></div>
+              <div class="zoom-bar" id="ana-bar" title="Analizador de espectro durante la reproducción (0 a −90 dBFS)"><span class="ms-lbl">Analizador</span>
+                <button class="ms-btn" id="ana-pre" title="Espectro de la entrada (antes del EQ), en gris">Pre</button>
+                <button class="ms-btn" id="ana-post" title="Espectro de lo que suena (después del EQ y la salida)">Post</button>
+                <button class="ms-btn" id="ana-speed" title="Caída del analizador (clic para cambiar)">Media</button>
+                <button class="ms-btn" id="ana-tilt" title="Inclinación del analizador alrededor de 1 kHz (clic para cambiar). En 0, el ruido rosa sale plano">0 dB/oct</button>
+              </div>
               <div class="newtype-bar" id="newtype-bar"><span class="ms-lbl">Nuevo punto</span></div>
             </div>
             <div class="chips-row"><div id="band-chips" class="band-chips"></div><span id="band-count" class="band-count">0 / 12</span></div>
@@ -1365,6 +1371,8 @@ function drawMag(curves, sr, sel) {
   });
   const zY = toY(0);
 
+  drawAnalyzer(ctx, G);   // v0.24: espectro detrás de las curvas
+
   const anyActive = curves.some(c => c.db.some(v => Math.abs(v) > 0.001));
 
   if (anyActive) {
@@ -2154,6 +2162,157 @@ function initOut() {
   syncOut();
 }
 
+
+// ── Analizador de espectro (v0.24, primero en la web) ─────────────────
+// Durante la reproducción: Pre = archivo original; Post = lo que suena (procesado con la ganancia
+// de salida, o el original si se reproduce el original). Suma mono (L+R)/2, FFT de 8192 con Hann
+// terminando en la muestra que suena, un valor por píxel (máximo de los bins que caen en él o
+// interpolado en graves), subida rápida y caída según la velocidad. Escala propia: 0 a −90 dBFS
+// de arriba abajo (un seno a 0 dBFS marca 0), con inclinación alrededor de 1 kHz.
+const ANA_N = 8192, ANA_TOP = 0, ANA_RANGE = 90;
+const ANA_SPEEDS = [['Lenta', 12], ['Media', 30], ['Rápida', 80]];   // caída en dB/s
+const ANA_TILTS = [0, 1.5, 3, 4.5];   // con suma por bandas el ruido rosa ya sale plano en 0
+const ana = { pre: true, post: true, speed: 1, tilt: 0, preDb: null, postDb: null, last: 0, active: false };
+try {
+  const st = JSON.parse(localStorage.getItem('excellecu.ana2') || 'null');
+  if (st) Object.assign(ana, { pre: !!st.pre, post: !!st.post, speed: st.speed | 0, tilt: st.tilt | 0 });
+} catch (e) {}
+function saveAna() { try { localStorage.setItem('excellecu.ana2', JSON.stringify({ pre: ana.pre, post: ana.post, speed: ana.speed, tilt: ana.tilt })); } catch (e) {} }
+
+// FFT iterativa en el sitio (radix 2) con tablas precalculadas: rápida para cada fotograma
+const anaFft = (() => {
+  const n = ANA_N, levels = Math.log2(n);
+  const rev = new Uint32Array(n);
+  for (let i = 0; i < n; i++) { let r = 0; for (let b = 0; b < levels; b++) r |= ((i >> b) & 1) << (levels - 1 - b); rev[i] = r; }
+  const cos = new Float64Array(n / 2), sin = new Float64Array(n / 2);
+  for (let i = 0; i < n / 2; i++) { cos[i] = Math.cos(2 * Math.PI * i / n); sin[i] = -Math.sin(2 * Math.PI * i / n); }
+  const win = new Float64Array(n);
+  for (let i = 0; i < n; i++) win[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / n));
+  const re = new Float64Array(n), im = new Float64Array(n), pow = new Float64Array(n / 2 + 1);
+  // x(i) da la muestra i de la ventana; devuelve potencia por bin normalizada (seno a 0 dBFS = 1)
+  return function (x) {
+    for (let i = 0; i < n; i++) { re[rev[i]] = x(i) * win[i]; im[rev[i]] = 0; }
+    for (let size = 2; size <= n; size <<= 1) {
+      const half = size >> 1, step = n / size;
+      for (let i = 0; i < n; i += size) for (let j = 0, k = 0; j < half; j++, k += step) {
+        const a = i + j, b = a + half;
+        const tr = re[b] * cos[k] - im[b] * sin[k], ti = re[b] * sin[k] + im[b] * cos[k];
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+      }
+    }
+    const norm = 4 / n;   // 2/Σventana (Σ Hann = n/2), en amplitud
+    for (let k = 0; k <= n / 2; k++) pow[k] = (re[k] * re[k] + im[k] * im[k]) * norm * norm;
+    return pow;
+  };
+})();
+
+// Potencia por bin → dB por píxel de la gráfica, con la inclinación. Cada píxel suma la energía de
+// 1/12 de octava a su alrededor (como un analizador por bandas): un seno marca su nivel real y el
+// ruido rosa sale plano sin inclinación. La suma se divide entre el ancho de banda equivalente de
+// la ventana Hann (1,5 bins); en graves, donde 1/12 de octava es más estrecho que eso, se usa
+// como mínimo ese ancho, así los senos graves tampoco pierden nivel.
+const ANA_SMOOTH_OCT = 1 / 12, ANA_ENBW = 1.5;
+function anaToPixels(pow, sr, G) {
+  const binHz = sr / ANA_N, out = new Float32Array(Math.max(1, Math.round(G.pw)));
+  const tilt = ANA_TILTS[ana.tilt] || 0, half = Math.pow(2, ANA_SMOOTH_OCT / 2), kMax = ANA_N / 2;
+  const pAt = k => { if (k <= 0) return pow[0]; if (k >= kMax) return pow[kMax]; const i = Math.floor(k), t = k - i; return pow[i] * (1 - t) + pow[i + 1] * t; };
+  for (let x = 0; x < out.length; x++) {
+    const fc = G.fromX(G.PAD.l + x);
+    if (fc > sr / 2) { out[x] = -200; continue; }
+    const kc = fc / binHz;
+    const w = Math.max(kc * (half - 1 / half), ANA_ENBW);   // ancho de la banda en bins
+    const a = kc - w / 2, b = kc + w / 2;
+    let e = 0;
+    if (w <= 6) { const steps = 12; for (let j = 0; j < steps; j++) e += pAt(a + (j + 0.5) * w / steps); e *= w / steps; }
+    else { for (let k = Math.ceil(a); k <= Math.min(kMax, Math.floor(b)); k++) e += pow[k]; }
+    out[x] = 10 * Math.log10(e / ANA_ENBW + 1e-20) + tilt * Math.log2(fc / 1000);
+  }
+  return out;
+}
+
+function anaTick(now) {
+  const dt = ana.last ? Math.min(0.2, (now - ana.last) / 1000) : 0;
+  ana.last = now;
+  if (!ana.pre && !ana.post) { if (ana.active) { ana.active = false; ana.preDb = ana.postDb = null; redrawMagOnly(); } return; }
+  const G = magGeom();
+  let fresh = null;
+  if (playStart && audioCtx && rawBuffer) {
+    const sr = playStart.sr;
+    const lat = audioCtx.outputLatency || audioCtx.baseLatency || 0;
+    const end = Math.round((audioCtx.currentTime - playStart.t0 - lat) * sr);
+    const start = end - ANA_N;
+    const mono = (chs, M) => {
+      const a = chs[0], b = chs.length > 1 ? chs[1] : chs[0], n = a.length;
+      return i => {
+        const t = start + i;
+        if (t < 0 || t >= n) return 0;
+        let l = a[t], r = b[t];
+        if (M) { if (chs.length > 1) { const x = l * M.ll + r * M.rl, y = l * M.lr + r * M.rr; l = x; r = y; } else { l *= M.mono; r = l; } }
+        return 0.5 * (l + r);
+      };
+    };
+    fresh = {};
+    if (ana.pre) {
+      const raw = [];
+      for (let c = 0; c < rawBuffer.numberOfChannels; c++) raw.push(rawBuffer.getChannelData(c));
+      fresh.pre = anaToPixels(anaFft(mono(raw, null)), sr, G);
+    }
+    if (ana.post) fresh.post = anaToPixels(anaFft(mono(playStart.channels, playStart.withOut ? outMatrix() : null)), sr, G);
+  }
+  const fall = ANA_SPEEDS[ana.speed][1] * dt;
+  let visible = false;
+  const blend = (old, nw) => {
+    if (!nw && !old) return null;
+    const n = (nw || old).length;
+    if (!old || old.length !== n) old = new Float32Array(n).fill(-200);
+    for (let x = 0; x < n; x++) {
+      const v = nw ? nw[x] : -200;
+      old[x] = v > old[x] ? old[x] + (v - old[x]) * 0.6 : Math.max(v, old[x] - fall);   // subida rápida, caída suave
+      if (old[x] > ANA_TOP - ANA_RANGE) visible = true;
+    }
+    return old;
+  };
+  ana.preDb = ana.pre ? blend(ana.preDb, fresh && fresh.pre) : null;
+  ana.postDb = ana.post ? blend(ana.postDb, fresh && fresh.post) : null;
+  if (visible || ana.active) redrawMagOnly();
+  ana.active = visible;
+}
+
+function drawAnalyzer(ctx, G) {
+  if (!ana.active) return;
+  const yFor = db => G.PAD.t + Math.min(1, Math.max(0, (ANA_TOP - db) / ANA_RANGE)) * G.ph;
+  const bottom = G.PAD.t + G.ph;
+  const path = arr => {
+    ctx.beginPath(); ctx.moveTo(G.PAD.l, bottom);
+    for (let x = 0; x < arr.length; x++) ctx.lineTo(G.PAD.l + x, yFor(arr[x]));
+    ctx.lineTo(G.PAD.l + arr.length, bottom); ctx.closePath();
+  };
+  if (ana.preDb) {
+    path(ana.preDb);
+    ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 0.8; ctx.stroke();
+  }
+  if (ana.postDb) {
+    path(ana.postDb);
+    ctx.fillStyle = 'rgba(62,207,163,0.08)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(62,207,163,0.55)'; ctx.lineWidth = 1; ctx.stroke();
+  }
+}
+
+function syncAnaButtons() {
+  $id('ana-pre').classList.toggle('ms-active', ana.pre);
+  $id('ana-post').classList.toggle('ms-active', ana.post);
+  $id('ana-speed').textContent = ANA_SPEEDS[ana.speed][0];
+  $id('ana-tilt').textContent = (ANA_TILTS[ana.tilt] + ' dB/oct').replace('.', ',');
+}
+function initAnalyzer() {
+  $id('ana-pre').addEventListener('click', () => { ana.pre = !ana.pre; saveAna(); syncAnaButtons(); });
+  $id('ana-post').addEventListener('click', () => { ana.post = !ana.post; saveAna(); syncAnaButtons(); });
+  $id('ana-speed').addEventListener('click', () => { ana.speed = (ana.speed + 1) % ANA_SPEEDS.length; saveAna(); syncAnaButtons(); });
+  $id('ana-tilt').addEventListener('click', () => { ana.tilt = (ana.tilt + 1) % ANA_TILTS.length; saveAna(); syncAnaButtons(); });
+  syncAnaButtons();
+}
+
 // ── Medidores ────────────────────────────────────────────────────────
 // Durante la reproducción: entrada = archivo original, salida = lo que suena (procesado con la
 // ganancia de salida, o el original si se reproduce el original). Pico con caída de 20 dB/s,
@@ -2178,6 +2337,7 @@ function meterWindow(chs, idx, sr, M) {
 }
 
 function meterTick(now) {
+  anaTick(now);
   const dt = meters.last ? Math.min(0.2, (now - meters.last) / 1000) : 0;
   meters.last = now;
   let win = null;
@@ -2422,7 +2582,7 @@ function presetXml(name, st) {
   const o = st.out;
   body += P('out_mode', o.mode === 'ms' ? 1 : 0) + P('out_link', o.link === false ? 0 : 1)
         + P('out_l', o.l) + P('out_r', o.r) + P('out_m', o.m) + P('out_s', o.s);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.23" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.24" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
 }
 
 // XML → estado. Lo que falta toma el valor por defecto del plugin; lo desconocido se ignora.
@@ -2590,6 +2750,7 @@ setEngine(engine);
 initHandleEvents();
 initOut();
 initZoom();
+initAnalyzer();
 initMeters();
 initPresets();
 initHistory();

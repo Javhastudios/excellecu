@@ -25,6 +25,16 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
 - Pruebas de humo: retraso exacto puenteado (dif. 0), `processBlockBypassed`, bloques grandes, EQ
   plano sin diferencia al alternar, con EQ sin saltos, presets. Pendiente de pluginval en GitHub
   Actions con la próxima compilación.
+- **Analizador de espectro, en la web (v0.24) para probarlo antes de pasarlo al plugin.** Detrás de
+  la curva, mientras suena: Pre (entrada, en gris) y Post (lo que suena, con EQ y salida, en
+  verde), conmutables. Suma mono (L+R)/2, FFT de 8192 con Hann terminando en la muestra que suena
+  (descuenta la latencia de salida del navegador). Cada píxel suma la energía de 1/12 de octava
+  dividida entre el ancho equivalente de la ventana (1,5 bins; mínimo ese ancho en graves): un seno
+  marca su nivel real (seno a 0 dBFS = 0) y el ruido rosa sale plano. Escala propia de 0 a −90 dBFS
+  de arriba abajo. Caída lenta / media / rápida (12 / 30 / 80 dB/s), subida rápida. Inclinación 0 /
+  1,5 / 3 / 4,5 dB/oct alrededor de 1 kHz (0 por defecto). Se recuerda en el navegador. Prueba en
+  Chrome: seno de 1 kHz leído en −3,10 dBFS (esperado −3,10), Post con salida +2,04 dB.
+  Para el plugin habrá que alinear la entrada con la salida (retrasada la latencia).
 
 ## v0.23 (26/11/2026): puntos hasta 30 kHz y escuchar banda
 
