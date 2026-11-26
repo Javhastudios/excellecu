@@ -43,8 +43,9 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
     curva de Q 0,707 y no seguía a la Q (escalón en fc). Ahora los dos lados siguen la curva
     analógica con su Q y solo se recorta la resonancia que no toca: en «Base», el lado del cénit
     llega a la ganancia y no la pasa; en «Cénit», el lado de la base llega a 0 dB y no lo cruza.
-    Pendiente de ver el cénit con Javier y de decidir si las resonancias empiezan en Q 0,60
-    (ahora, como en el analógico, en 0,707).
+    Decidido: las resonancias empiezan en Q 0,707, como en el analógico estándar (la Q de
+    Excellecu equivale a la de otros EQ). Modo Base aprobado. Pendiente: afinar el cénit.
+    Referencias del mercado: Steinberg StudioEQ (Shelf I/II/III) y DMG EQuilibrium.
   - Al pasarlo al plugin: parámetro de forma por banda (y en `Params`/`bandGainAt` del motor C++,
     igual que la web para la comparación), selector y menú, y etiquetas editables con doble clic.
 
