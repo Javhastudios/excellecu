@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EQ Motor DFT — Prototipo v0.21</title>
+<title>EQ Motor DFT — Prototipo v0.22</title>
 <style>
   :root {
     --bg: #0e0e10;
@@ -103,7 +103,29 @@
   .info-card .v { font-size: 13px; color: var(--accent2); margin-top: 2px; }
 
   /* Módulo 2 */
-  .eq-layout { display: grid; grid-template-columns: 220px 1fr 92px; gap: 16px; }
+  .eq-layout { display: grid; grid-template-columns: minmax(0,1fr) 92px; gap: 16px; }
+  /* v0.22: gráfica a todo lo ancho, banda y salida debajo, fase plegada */
+  .eq-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .mag-box, .strip-box, .phase-box { background: rgba(255,255,255,0.02); border: 0.5px solid var(--border); border-radius: 4px; padding: 10px; }
+  .chips-row { display: flex; align-items: flex-start; gap: 8px; margin: 2px 0 6px; }
+  .chips-row .band-chips { flex: 1; margin-bottom: 0; }
+  .band-count { font-size: 9px; color: var(--muted); white-space: nowrap; padding-top: 3px; }
+  .zoom-bar { display: flex; align-items: center; gap: 3px; margin-left: 24px; }
+  .zoom-bar .ms-lbl, .newtype-bar .ms-lbl { margin-right: 4px; }
+  .strip { display: grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr); gap: 12px; }
+  .proto-strip { grid-template-columns: minmax(0,1fr) minmax(0,2fr); }
+  #band-box { min-height: 128px; }
+  #band-box .eq-section { border: none; background: none; padding: 0; margin: 0; }
+  .band-head .band-on { margin-left: auto; }
+  .band-head #bp-del { margin-left: 10px; width: auto; margin-top: 0; padding: 2px 8px; }
+  .type-canal { display: flex; flex-wrap: wrap; gap: 4px 20px; }
+  .type-canal .ms-row .ms-lbl { margin-right: 6px; }
+  #bp-controls { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 0 20px; margin-top: 4px; }
+  .motor-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 20px; }
+  .phase-box summary { cursor: pointer; list-style: none; margin-bottom: 0; }
+  .phase-box[open] summary { margin-bottom: 8px; }
+  .rms-sel { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+  .rms-sel .ms-btn { width: 100%; padding: 2px 0; }
   /* v0.21: barra de presets y deshacer, salida, medidores */
   .top-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 14px; flex-wrap: wrap; }
   .top-bar .sep { width: 14px; }
@@ -115,7 +137,7 @@
   .preset-mod { font-size: 9px; color: var(--warn); margin: 0 6px; min-width: 70px; }
   .out-note { font-size: 9px; color: var(--warn); line-height: 1.5; margin: -4px 0 10px; opacity: 0.9; }
   .out-link { margin-left: auto; font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 4px; cursor: pointer; }
-  .meters-box { background: rgba(255,255,255,0.02); border: 0.5px solid var(--border); border-radius: 4px; padding: 10px 6px; display: flex; flex-direction: column; align-self: start; height: 470px; }
+  .meters-box { background: rgba(255,255,255,0.02); border: 0.5px solid var(--border); border-radius: 4px; padding: 10px 6px; display: flex; flex-direction: column; align-self: start; height: 600px; }
   .meters-box canvas { width: 100%; flex: 1; min-height: 260px; cursor: pointer; }
   .eq-controls { display: flex; flex-direction: column; gap: 0; }
   .panel-title {
@@ -253,7 +275,7 @@
 </head>
 <body>
 
-<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.21</h1>
+<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.22</h1>
 
 <div class="modules">
 
@@ -305,114 +327,129 @@
         <input type="file" id="preset-file" accept=".excellecu,.xml" style="display:none">
       </div>
       <div class="eq-layout">
-        <div class="eq-controls">
-          <div class="panel-title">Señal de prueba</div>
-          <div style="display:flex;gap:6px;margin-bottom:12px">
-            <button class="play-btn" id="btn-orig" onclick="playOriginal()" disabled>▶ Original</button>
-            <button class="play-btn" id="btn-proc" onclick="playProcessed()" disabled>▶ Procesado</button>
-          </div>
-
-          <hr class="divider">
-          <div class="panel-title" style="display:flex;justify-content:space-between">
-            <span>Bandas</span><span id="band-count" style="color:var(--muted)">0 / 12</span>
-          </div>
-          <div id="band-chips" class="band-chips"></div>
-
-          <div id="band-empty" class="band-empty">
-            Doble clic en la gráfica para crear un punto del tipo elegido arriba.<br>
-            Clic derecho en la gráfica para elegir el tipo en el momento.
-          </div>
-
-          <div id="band-ctrls" class="eq-section" style="display:none">
-            <div class="band-head">
-              <span id="bp-swatch" class="band-swatch"></span>
-              <span id="bp-name" class="band-name">Banda</span>
-              <label class="band-on"><input type="checkbox" id="bp-on"> Activa</label>
+        <div class="eq-main">
+          <div class="mag-box">
+            <div class="panel-title" style="display:flex;align-items:center;gap:4px">Magnitud
+              <div class="zoom-bar" id="zoom-bar"><span class="ms-lbl">Escala</span></div>
+              <div class="newtype-bar" id="newtype-bar"><span class="ms-lbl">Nuevo punto</span></div>
             </div>
-            <div class="ms-row type-row" id="bp-types"></div>
-            <div class="ms-row"><span class="ms-lbl">Canal</span>
-              <button class="ms-btn" id="bp-st" title="Mismo ajuste en L y R">Estéreo</button>
-              <button class="ms-btn" id="bp-l" title="Canal izquierdo">L</button><button class="ms-btn" id="bp-r" title="Canal derecho">R</button><span style="width:4px"></span><button class="ms-btn" id="bp-m" title="Mid">M</button><button class="ms-btn" id="bp-s" title="Side">S</button>
+            <div class="chips-row"><div id="band-chips" class="band-chips"></div><span id="band-count" class="band-count">0 / 12</span></div>
+            <canvas id="cMag" height="320" style="touch-action:none"></canvas>
+            <div style="font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:0.04em;opacity:0.7">Doble clic = crear punto · clic derecho = elegir tipo / eliminar · arrastrar = frecuencia ↔ / ganancia ↕ · Mayús ↕ = Q / pendiente · Alt (⌥) = fino · rueda = Q / pendiente · Supr = eliminar · Ctrl/⌘+Z = deshacer</div>
+          </div>
+
+          <div class="strip">
+            <div class="strip-box" id="band-box">
+              <div id="band-empty" class="band-empty">
+                Ninguna banda seleccionada.<br>
+                Doble clic en la gráfica para crear un punto del tipo elegido arriba; clic derecho para elegir el tipo en el momento.
+              </div>
+              <div id="band-ctrls" class="eq-section" style="display:none">
+                <div class="band-head">
+                  <span id="bp-swatch" class="band-swatch"></span>
+                  <span id="bp-name" class="band-name">Banda</span>
+                  <label class="band-on"><input type="checkbox" id="bp-on"> Activa</label>
+                  <button class="ms-btn band-del" id="bp-del" title="Eliminar banda (Supr)">Eliminar banda</button>
+                </div>
+                <div class="type-canal">
+                  <div class="ms-row type-row" id="bp-types"></div>
+                  <div class="ms-row"><span class="ms-lbl">Canal</span>
+                    <button class="ms-btn" id="bp-st" title="Mismo ajuste en L y R">Estéreo</button>
+                    <button class="ms-btn" id="bp-l" title="Canal izquierdo">L</button><button class="ms-btn" id="bp-r" title="Canal derecho">R</button><span style="width:4px"></span><button class="ms-btn" id="bp-m" title="Mid">M</button><button class="ms-btn" id="bp-s" title="Side">S</button>
+                  </div>
+                </div>
+                <div id="bp-controls">
+                  <div class="control bp-ctrl">
+                    <label>Frecuencia <span id="lbl-bpfc">1.00 kHz</span></label>
+                    <input type="range" id="sl-bpfc" min="0" max="1000" step="1" value="566">
+                  </div>
+                  <div class="control bp-ctrl" id="bp-gain-row">
+                    <label>Ganancia <span id="lbl-bpgain">0.0 dB</span></label>
+                    <input type="range" id="sl-bpgain" min="-20" max="12" step="0.1" value="0">
+                  </div>
+                  <div class="control bp-ctrl" id="bp-q-row">
+                    <label>Factor Q <span id="lbl-bpq">1.00</span></label>
+                    <input type="range" id="sl-bpq" min="0" max="1000" step="1" value="500">
+                  </div>
+                  <div class="control bp-ctrl" id="bp-slope-row">
+                    <label>Pendiente <span id="lbl-bpslope">12 dB/oct</span></label>
+                    <input type="range" id="sl-bpslope" min="0" max="3" step="1" value="1">
+                  </div>
+                </div>
+              </div>
             </div>
-            <div id="bp-controls">
-              <div class="control bp-ctrl">
-                <label>Frecuencia <span id="lbl-bpfc">1.00 kHz</span></label>
-                <input type="range" id="sl-bpfc" min="0" max="1000" step="1" value="566">
+
+            <div class="strip-box out-box">
+              <div class="ms-row"><span class="ms-lbl" style="color:var(--text);margin-right:8px">Salida</span>
+                <button class="ms-btn" id="out-lr" title="Ganancia de salida de L y R">L/R</button>
+                <button class="ms-btn" id="out-ms" title="Ganancia de salida de Mid y Side. Las dos parejas actúan siempre; el modo elige cuál se edita">M/S</button>
+                <label class="out-link" title="Mover una ganancia mueve la otra lo mismo"><input type="checkbox" id="out-link" checked> Enlazar</label>
               </div>
-              <div class="control bp-ctrl" id="bp-gain-row">
-                <label>Ganancia <span id="lbl-bpgain">0.0 dB</span></label>
-                <input type="range" id="sl-bpgain" min="-20" max="12" step="0.1" value="0">
+              <div class="control">
+                <label><span id="out-a-name">L</span> <span id="lbl-out-a">0.0 dB</span></label>
+                <input type="range" id="sl-out-a" min="-24" max="12" step="0.1" value="0" title="Doble clic: 0 dB">
               </div>
-              <div class="control bp-ctrl" id="bp-q-row">
-                <label>Factor Q <span id="lbl-bpq">1.00</span></label>
-                <input type="range" id="sl-bpq" min="0" max="1000" step="1" value="500">
+              <div class="control">
+                <label><span id="out-b-name">R</span> <span id="lbl-out-b">0.0 dB</span></label>
+                <input type="range" id="sl-out-b" min="-24" max="12" step="0.1" value="0" title="Doble clic: 0 dB">
               </div>
-              <div class="control bp-ctrl" id="bp-slope-row">
-                <label>Pendiente <span id="lbl-bpslope">12 dB/oct</span></label>
-                <input type="range" id="sl-bpslope" min="0" max="3" step="1" value="1">
+              <div class="out-note" id="out-note" style="display:none"></div>
+              <div style="font-size:9px;color:var(--muted);line-height:1.6;opacity:0.7">En directo al reproducir el procesado y al exportar; no hace falta volver a procesar.</div>
+            </div>
+          </div>
+
+          <!-- Solo en la web: escucha, motor y procesado -->
+          <div class="strip proto-strip">
+            <div class="strip-box">
+              <div class="panel-title">Señal de prueba</div>
+              <div style="display:flex;gap:6px;margin-bottom:10px">
+                <button class="play-btn" id="btn-orig" onclick="playOriginal()" disabled>▶ Original</button>
+                <button class="play-btn" id="btn-proc" onclick="playProcessed()" disabled>▶ Procesado</button>
+              </div>
+              <button class="process-btn" id="process-btn" onclick="processAudio()" disabled>Procesar audio</button>
+              <div class="progress-wrap" id="proc-progress" style="display:block;margin-top:8px">
+                <div class="progress-bar" id="proc-bar" style="width:0%"></div>
               </div>
             </div>
-            <button class="ms-btn band-del" id="bp-del" title="Eliminar banda (Supr)">Eliminar banda</button>
+            <div class="strip-box">
+              <div class="panel-title">Motor DFT</div>
+              <div class="motor-grid">
+                <div>
+                  <div class="ms-row"><span class="ms-lbl">Modo</span>
+                    <button class="ms-btn" id="eng-exact" title="Convolución exacta con zero-padding: sin aliasing temporal ni huella de bloque">Exacto</button>
+                    <button class="ms-btn" id="eng-classic" title="STFT original (Hann + overlap-add), con ventana periódica">Clásico</button>
+                  </div>
+                  <div id="eng-note" style="font-size:9px;color:var(--muted);line-height:1.6;opacity:0.8"></div>
+                </div>
+                <div>
+                  <div class="control">
+                    <label>Tamaño ventana <span id="lbl-n">4096</span></label>
+                    <input type="range" id="sl-n" min="0" max="3" step="1" value="2">
+                  </div>
+                  <div class="control" id="ov-row">
+                    <label>Overlap <span id="lbl-ov">50%</span></label>
+                    <input type="range" id="sl-ov" min="0" max="2" step="1" value="1">
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <hr class="divider">
-          <div class="panel-title">Salida</div>
-          <div class="ms-row"><span class="ms-lbl">Editar</span>
-            <button class="ms-btn" id="out-lr" title="Ganancia de salida de L y R">L/R</button>
-            <button class="ms-btn" id="out-ms" title="Ganancia de salida de Mid y Side. Las dos parejas actúan siempre; el modo elige cuál se edita">M/S</button>
-            <label class="out-link" title="Mover una ganancia mueve la otra lo mismo"><input type="checkbox" id="out-link" checked> Enlazar</label>
-          </div>
-          <div class="control">
-            <label><span id="out-a-name">L</span> <span id="lbl-out-a">0.0 dB</span></label>
-            <input type="range" id="sl-out-a" min="-24" max="12" step="0.1" value="0" title="Doble clic: 0 dB">
-          </div>
-          <div class="control">
-            <label><span id="out-b-name">R</span> <span id="lbl-out-b">0.0 dB</span></label>
-            <input type="range" id="sl-out-b" min="-24" max="12" step="0.1" value="0" title="Doble clic: 0 dB">
-          </div>
-          <div class="out-note" id="out-note" style="display:none"></div>
-          <div style="font-size:9px;color:var(--muted);line-height:1.6;margin:-2px 0 4px;opacity:0.7">Se aplica en directo al reproducir el procesado y al exportar; no hace falta volver a procesar.</div>
-
-          <hr class="divider">
-          <div class="panel-title">Motor DFT</div>
-          <div class="ms-row"><span class="ms-lbl">Modo</span>
-            <button class="ms-btn" id="eng-exact" title="Convolución exacta con zero-padding: sin aliasing temporal ni huella de bloque">Exacto</button>
-            <button class="ms-btn" id="eng-classic" title="STFT original (Hann + overlap-add), con ventana periódica">Clásico</button>
-          </div>
-          <div class="control">
-            <label>Tamaño ventana <span id="lbl-n">4096</span></label>
-            <input type="range" id="sl-n" min="0" max="3" step="1" value="2">
-          </div>
-          <div class="control" id="ov-row">
-            <label>Overlap <span id="lbl-ov">50%</span></label>
-            <input type="range" id="sl-ov" min="0" max="2" step="1" value="1">
-          </div>
-          <div id="eng-note" style="font-size:9px;color:var(--muted);line-height:1.6;margin-bottom:8px;opacity:0.8"></div>
-
-          <button class="process-btn" id="process-btn" onclick="processAudio()" disabled>Procesar audio</button>
-          <div class="progress-wrap" id="proc-progress" style="display:block;margin-top:8px">
-            <div class="progress-bar" id="proc-bar" style="width:0%"></div>
-          </div>
-        </div>
-
-        <div class="eq-charts">
-          <div style="background:rgba(255,255,255,0.02);border:0.5px solid var(--border);border-radius:4px;padding:10px">
-            <div class="panel-title" style="display:flex;align-items:center">Magnitud<div class="newtype-bar" id="newtype-bar"><span class="ms-lbl">Nuevo punto</span></div></div>
-            <canvas id="cMag" height="160" style="touch-action:none"></canvas>
-            <div style="font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:0.04em;opacity:0.7">Doble clic = crear punto · clic derecho = elegir tipo / eliminar · arrastrar = frecuencia ↔ / ganancia ↕ · Mayús ↕ = Q / pendiente · Alt (⌥) = fino · rueda = Q / pendiente · Supr = eliminar</div>
-          </div>
-          <div style="background:rgba(255,255,255,0.02);border:0.5px solid var(--border);border-radius:4px;padding:10px">
-            <div class="panel-title">
-              Fase
+          <details class="phase-box" id="phase-details">
+            <summary class="panel-title">Fase (diagnóstico)
               <span id="phase-badge" style="font-size:9px;padding:2px 6px;border-radius:3px;margin-left:6px;background:rgba(62,207,163,0.12);color:#3ecfa3;border:0.5px solid rgba(62,207,163,0.3)">sin desplazamiento ✓</span>
-            </div>
+            </summary>
             <canvas id="cPhase" height="130"></canvas>
-          </div>
+          </details>
         </div>
 
         <div class="meters-box">
           <div class="panel-title">Nivel</div>
           <canvas id="cMeter" title="Pico (claro) y RMS (oscuro) durante la reproducción. Clic: borra saturación y máximos"></canvas>
+          <div class="rms-sel">
+            <button class="ms-btn" id="rms-aes" title="RMS según AES-17: +3,01 dB, un seno marca lo mismo en pico y en RMS">AES-17</button>
+            <button class="ms-btn" id="rms-flat" title="RMS tal cual: un seno marca 3 dB por debajo de su pico">Sin ponderar</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1269,8 +1306,12 @@ function updateCharts() {
 }
 
 // Geometría del gráfico de magnitud (compartida por el dibujo y el ratón)
-const MAG_H = 160, MAG_PAD = {l:40,r:8,t:8,b:24};
-const MAG_DB_MIN = -21, MAG_DB_MAX = 15;
+const MAG_H = 320, MAG_PAD = {l:40,r:8,t:8,b:24};   // v0.22: el doble de alta
+// Escala vertical: ±3, ±6, ±12 o ±24 dB (más un 10 % de margen); se recuerda en este navegador
+const MAG_ZOOMS = [3, 6, 12, 24];
+let magZoom = 12;
+try { const z = parseInt(localStorage.getItem('excellecu.zoom')); if (MAG_ZOOMS.includes(z)) magZoom = z; } catch (e) {}
+const magLo = () => -magZoom * 1.1, magHi = () => magZoom * 1.1;
 const MAG_F_MIN = 20, MAG_F_MAX = 20000;
 function magGeom() {
   const W = CHART_W, H = MAG_H, PAD = MAG_PAD;
@@ -1279,10 +1320,11 @@ function magGeom() {
   const toX = f => f>0 ? PAD.l+(Math.log10(f)-lMin)/(lMax-lMin)*pw : PAD.l;
   const fromX = x => Math.pow(10, lMin + (x-PAD.l)/pw*(lMax-lMin));
   const toY = db => {
-    if (!isFinite(db)) db = db < 0 ? MAG_DB_MIN : MAG_DB_MAX;
-    return PAD.t+ph-(Math.max(MAG_DB_MIN,Math.min(MAG_DB_MAX,db))-MAG_DB_MIN)/(MAG_DB_MAX-MAG_DB_MIN)*ph;
+    const lo = magLo(), hi = magHi();
+    if (!isFinite(db)) db = db < 0 ? lo : hi;
+    return PAD.t+ph-(Math.max(lo,Math.min(hi,db))-lo)/(hi-lo)*ph;
   };
-  const fromY = y => MAG_DB_MIN + (PAD.t+ph-y)/ph*(MAG_DB_MAX-MAG_DB_MIN);
+  const fromY = y => magLo() + (PAD.t+ph-y)/ph*(magHi()-magLo());
   return { W, H, PAD, pw, ph, toX, fromX, toY, fromY };
 }
 
@@ -1303,7 +1345,10 @@ function drawMag(curves, sr, sel) {
   const binHz = sr / N;
 
   ctx.clearRect(0,0,W,H);
-  [-18,-12,-6,0,6,12].forEach(db => {
+  const zStep = magZoom === 3 ? 1 : magZoom === 6 ? 2 : magZoom === 12 ? 3 : 6;
+  const gridDb = [];
+  for (let db = -magZoom; db <= magZoom; db += zStep) gridDb.push(db);
+  gridDb.forEach(db => {
     const y = toY(db);
     ctx.beginPath(); ctx.strokeStyle = db===0?'rgba(255,255,255,0.15)':'rgba(255,255,255,0.05)';
     ctx.lineWidth = db===0?1:0.5; ctx.moveTo(PAD.l,y); ctx.lineTo(W-PAD.r,y); ctx.stroke();
@@ -1645,7 +1690,7 @@ function initHandleEvents() {
         const dLog = (x - d.x0) / G.pw * (lMax - lMin) * fine;
         p.fc = Math.min(MAG_F_MAX, Math.max(MAG_F_MIN, d.fc0 * Math.pow(10, dLog)));
         if (t.gain) {
-          const dDb = -(y - d.y0) / G.ph * (MAG_DB_MAX - MAG_DB_MIN) * fine;
+          const dDb = -(y - d.y0) / G.ph * (magHi() - magLo()) * fine;   // con zoom, más fino
           p.gain = Math.round(Math.min(EQ_GAIN_MAX, Math.max(EQ_GAIN_MIN, d.gain0 + dDb)) * 10) / 10;
         }
       }
@@ -1842,7 +1887,7 @@ function drawPhase(phaseBefore, phaseAfter, gains, sr) {
 let CHART_W = 0;
 function initChartWidth() {
   const c = document.getElementById('cMag');
-  CHART_W = Math.floor(c.parentElement.getBoundingClientRect().width) - 20;
+  CHART_W = Math.floor(c.parentElement.getBoundingClientRect().width) - 22;
 }
 
 document.getElementById('sl-n').addEventListener('input', function() {
@@ -1920,11 +1965,11 @@ function syncPanel() {
   const b = selBand();
   $id('band-empty').style.display = b ? 'none' : 'block';
   $id('band-ctrls').style.display = b ? 'block' : 'none';
-  if (!b) return;
+  if (!b) { $id('band-box').style.borderColor = ''; $id('band-box').style.background = ''; return; }
 
   const t = BAND_TYPES[b.type], p = editSet(b);
-  const box = $id('band-ctrls');
-  box.style.setProperty('--band-color', b.color);
+  const box = $id('band-box');   // v0.22: el color de la banda tiñe todo su panel
+  $id('band-ctrls').style.setProperty('--band-color', b.color);
   box.style.borderColor = b.color + '55';
   box.style.background  = b.color + '0d';
   $id('bp-swatch').style.background = b.color;
@@ -2201,7 +2246,7 @@ function drawMeters() {
         ctx.globalAlpha = alpha; ctx.fillStyle = db > 0 ? red : base;
         ctx.fillRect(x, y, bw, bottom - y); ctx.globalAlpha = 1;
       };
-      fill(m.peak, 0.45); fill(m.rms, 0.85);
+      fill(m.peak, 0.45); fill(m.rms + (rmsAes ? AES17_OFFSET : 0), 0.85);
       if (m.hold > METER_MIN) { ctx.fillStyle = m.hold > 0 ? red : 'rgba(232,232,240,0.8)'; ctx.fillRect(x, yFor(m.hold) - 0.5, bw, 1.2); }
       if (nc === 2) { ctx.font = '8px ' + col('--font'); ctx.fillStyle = col('--muted'); ctx.fillText(c ? 'R' : 'L', x + bw / 2, bottom + 6); }
     }
@@ -2210,7 +2255,42 @@ function drawMeters() {
   });
 }
 
+// RMS: AES-17 (por defecto, +3,01 dB: un seno marca lo mismo en pico y en RMS) o sin ponderar
+const AES17_OFFSET = 3.0103;
+let rmsAes = true;
+try { if (localStorage.getItem('excellecu.rmsAes') === '0') rmsAes = false; } catch (e) {}
+function setRmsAes(on) {
+  rmsAes = on;
+  try { localStorage.setItem('excellecu.rmsAes', on ? '1' : '0'); } catch (e) {}
+  $id('rms-aes').classList.toggle('ms-active', on);
+  $id('rms-flat').classList.toggle('ms-active', !on);
+}
+
+// ── Escala vertical de la gráfica (v0.22) ────────────────────────────
+function setZoom(z) {
+  magZoom = z;
+  try { localStorage.setItem('excellecu.zoom', String(z)); } catch (e) {}
+  MAG_ZOOMS.forEach(v => $id('zoom-' + v).classList.toggle('ms-active', v === z));
+  redrawMagOnly();
+}
+function initZoom() {
+  const bar = $id('zoom-bar');
+  MAG_ZOOMS.forEach(z => {
+    const b = document.createElement('button');
+    b.className = 'ms-btn'; b.id = 'zoom-' + z; b.textContent = '±' + z;
+    b.title = `Escala vertical: ±${z} dB`;
+    b.addEventListener('click', () => setZoom(z));
+    bar.appendChild(b);
+  });
+  setZoom(magZoom);
+  // La fase está plegada: al abrirla se dibuja con el ancho que tenga
+  $id('phase-details').addEventListener('toggle', () => updateCharts());
+}
+
 function initMeters() {
+  $id('rms-aes').addEventListener('click', () => setRmsAes(true));
+  $id('rms-flat').addEventListener('click', () => setRmsAes(false));
+  setRmsAes(rmsAes);
   $id('cMeter').addEventListener('click', () => {
     for (const g of ['in', 'out']) for (const m of meters[g]) { m.clip = false; m.max = -100; m.hold = -100; }
   });
@@ -2341,7 +2421,7 @@ function presetXml(name, st) {
   const o = st.out;
   body += P('out_mode', o.mode === 'ms' ? 1 : 0) + P('out_link', o.link === false ? 0 : 1)
         + P('out_l', o.l) + P('out_r', o.r) + P('out_m', o.m) + P('out_s', o.s);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.21" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.22" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
 }
 
 // XML → estado. Lo que falta toma el valor por defecto del plugin; lo desconocido se ignora.
@@ -2508,6 +2588,7 @@ $id('eng-classic').addEventListener('click', () => setEngine('classic'));
 setEngine(engine);
 initHandleEvents();
 initOut();
+initZoom();
 initMeters();
 initPresets();
 initHistory();

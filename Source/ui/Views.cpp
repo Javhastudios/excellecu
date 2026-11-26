@@ -7,7 +7,6 @@ using namespace juce;
 namespace
 {
 String u8 (const char* t) { return String::fromUTF8 (t); }
-constexpr double MAG_DB_MIN = -21, MAG_DB_MAX = 15;
 constexpr float HANDLE_R = 6, HANDLE_HIT = 11;
 constexpr float Q_DRAG_PX_PER_X4 = 100, SLOPE_DRAG_PX = 25;
 
@@ -159,16 +158,32 @@ double MagChart::Geom::fromX (float x) const
 }
 float MagChart::Geom::toY (double db) const
 {
-    if (! std::isfinite (db)) db = db < 0 ? MAG_DB_MIN : MAG_DB_MAX;
-    return t + ph - (float) ((jlimit (MAG_DB_MIN, MAG_DB_MAX, db) - MAG_DB_MIN) / (MAG_DB_MAX - MAG_DB_MIN)) * ph;
+    if (! std::isfinite (db)) db = db < 0 ? lo : hi;
+    return t + ph - (float) ((jlimit (lo, hi, db) - lo) / (hi - lo)) * ph;
 }
-double MagChart::Geom::fromY (float y) const { return MAG_DB_MIN + (t + ph - y) / ph * (MAG_DB_MAX - MAG_DB_MIN); }
+double MagChart::Geom::fromY (float y) const { return lo + (t + ph - y) / ph * (hi - lo); }
+
+int MagChart::zoomDb() const
+{
+    const int z = model.proc.apvts.state.getProperty ("zoomDb", 12);
+    for (int v : ZOOMS) if (v == z) return z;
+    return 12;
+}
+
+void MagChart::setZoomDb (int db)
+{
+    model.proc.apvts.state.setProperty ("zoomDb", db, nullptr);
+    repaint();
+}
 
 MagChart::Geom MagChart::geom() const
 {
     Geom g;
     g.W = (float) getWidth(); g.H = (float) getHeight();
     g.pw = g.W - g.l - g.r; g.ph = g.H - g.t - g.b;
+    const double z = zoomDb();
+    g.hi = z * 1.1;
+    g.lo = -z * 1.1;
     return g;
 }
 
@@ -218,7 +233,9 @@ void MagChart::paint (Graphics& g)
     const auto& d = *data;
     const auto G = geom();
 
-    for (int db : { -18, -12, -6, 0, 6, 12 })
+    const int z = zoomDb();
+    const int stepDb = z == 3 ? 1 : z == 6 ? 2 : z == 12 ? 3 : 6;
+    for (int db = -z; db <= z; db += stepDb)
     {
         const float y = G.toY (db);
         g.setColour (Colours::white.withAlpha (db == 0 ? 0.15f : 0.05f));
@@ -449,7 +466,7 @@ void MagChart::mouseDrag (const MouseEvent& e)
         model.setLive (ids::set (d.h.slot, key, "fc"), (float) jlimit (ui::MAG_F_MIN, ui::MAG_F_MAX, d.fc0 * std::pow (10.0, dLog)));
         if (eq::typeHasGain (b.type))
         {
-            const double dDb = -(y - d.y0) / G.ph * (MAG_DB_MAX - MAG_DB_MIN) * fine;
+            const double dDb = -(y - d.y0) / G.ph * (G.hi - G.lo) * fine;   // con zoom, más fino
             model.setLive (ids::set (d.h.slot, key, "gain"), (float) (std::round (jlimit (ui::EQ_GAIN_MIN, ui::EQ_GAIN_MAX, d.gain0 + dDb) * 10) / 10));
         }
     }

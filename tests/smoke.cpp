@@ -333,6 +333,10 @@ int main (int argc, char** argv)
         // RMS de todo lo recogido: incluye las 4352 muestras de silencio de la latencia
         const float wantRms = (float) (20 * std::log10 (0.25 / std::sqrt (2.0)) + 10 * std::log10 ((48000.0 - 4352) / 48000.0));
         check (std::abs (ch.rmsDb - wantRms) < 0.05f, "medidor de salida R: RMS " + String (ch.rmsDb, 2) + " dBFS (esperado " + String (wantRms, 2) + ")");
+        mv.setAes17 (true);
+        check (std::abs (mv.shownRms (ch) - (wantRms + 3.0103f)) < 0.05f, "RMS AES-17 por defecto: +3,01 dB (" + String (mv.shownRms (ch), 2) + ")");
+        mv.setAes17 (false);
+        check (std::abs (mv.shownRms (ch) - wantRms) < 0.05f && ! (bool) p.apvts.state.getProperty ("rmsAes17"), "RMS sin ponderar (se guarda en el estado)");
         check (std::abs (mv.channel (0, 0).peakDb + 6.02f) < 0.1f && std::abs (mv.channel (1, 0).peakDb + 6.02f) < 0.1f,
                "pico de entrada y salida L 0,5 (−6 dBFS)");
         check (p.inMeter[0].fifo.getNumReady() == 0, "el medidor recoge todo lo pendiente");
@@ -368,6 +372,11 @@ int main (int argc, char** argv)
         run (p, 4800, sine (1000, 1.2));
         mv.tick();
         check (mv.channel (0, 0).clip && mv.channel (1, 0).clip, "saturación encendida con picos por encima de 0 dBFS");
+        {
+            ExcellecuProcessor fresh;
+            MeterView mf (fresh);
+            check (mf.aes17(), "una instancia nueva arranca en AES-17");
+        }
     }
 
     {
@@ -549,7 +558,7 @@ int main (int argc, char** argv)
         p.prepareToPlay (SR, 480);
         ui::BandModel m (p);
         std::unique_ptr<AudioProcessorEditor> ed (p.createEditor());
-        ed->setSize (1100, 780);
+        ed->setSize (1120, 1000);
         MessageManager::getInstance()->runDispatchLoopUntil (200);
         snapshot (*ed, outDir.getChildFile ("01_vacio.png"));
 
@@ -597,6 +606,24 @@ int main (int argc, char** argv)
             p.selected = 3;
             MessageManager::getInstance()->runDispatchLoopUntil (300);
             snapshot (*ed, outDir.getChildFile ("06_tdm.png"));
+            // Escala ±3 dB (se guarda con la sesión)
+            p.apvts.state.setProperty ("zoomDb", 3, nullptr);
+            MessageManager::getInstance()->runDispatchLoopUntil (200);
+            snapshot (*ed, outDir.getChildFile ("07_tdm_escala3.png"));
+            MemoryBlock st;
+            p.getStateInformation (st);
+            ExcellecuProcessor q;
+            q.setStateInformation (st.getData(), (int) st.getSize());
+            check ((int) q.apvts.state.getProperty ("zoomDb") == 3, "la escala vertical se guarda con la sesión");
+            p.apvts.state.setProperty ("zoomDb", 12, nullptr);
+        }
+        {
+            // Tamaño mínimo: todo cabe sin solaparse
+            ed->setSize (960, 760);
+            p.selected = 3;
+            MessageManager::getInstance()->runDispatchLoopUntil (200);
+            snapshot (*ed, outDir.getChildFile ("08_minimo.png"));
+            ed->setSize (1120, 1000);
         }
         ed.reset();
 
@@ -606,7 +633,7 @@ int main (int argc, char** argv)
         {
             p.selected = sel;
             ed.reset (p.createEditor());
-            ed->setSize (1100, 780);
+            ed->setSize (1120, 1000);
             MessageManager::getInstance()->runDispatchLoopUntil (100);
             ed.reset();
         }

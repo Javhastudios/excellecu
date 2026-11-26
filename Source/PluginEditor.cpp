@@ -73,10 +73,34 @@ void BandChips::mouseUp (const MouseEvent& e)
 }
 
 //==============================================================================
-ControlsPanel::ControlsPanel (ExcellecuProcessor& p, ui::BandModel& m, std::function<void()> cb)
-    : proc (p), model (m), onChange (cb), chips (m, cb)
+void SliderRow::setup (Component& parent, const String& n)
 {
-    addAndMakeVisible (chips);
+    name = n;
+    slider.setSliderStyle (Slider::LinearHorizontal);
+    slider.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+    parent.addAndMakeVisible (slider);
+}
+
+void SliderRow::place (int x, int y, int w)
+{
+    label = { x, y, w, 14 };
+    slider.setBounds (x - 6, y + 16, w + 12, 14);
+    slider.setVisible (visible);
+}
+
+static void paintPanelFrame (Graphics& g, Rectangle<int> r, Colour tint)
+{
+    auto f = r.toFloat().reduced (0.5f);
+    g.setColour (tint.withAlpha (0x0d / 255.0f));
+    g.fillRoundedRectangle (f, 4.0f);
+    g.setColour (tint.withAlpha (0x55 / 255.0f));
+    g.drawRoundedRectangle (f, 4.0f, 0.6f);
+}
+
+//==============================================================================
+BandPanel::BandPanel (ExcellecuProcessor& p, ui::BandModel& m, std::function<void()> cb)
+    : proc (p), model (m), onChange (std::move (cb))
+{
     addAndMakeVisible (onToggle);
     for (int t = 0; t < eq::NUM_TYPES; ++t)
     {
@@ -96,124 +120,19 @@ ControlsPanel::ControlsPanel (ExcellecuProcessor& p, ui::BandModel& m, std::func
     addAndMakeVisible (deleteButton);
     onToggle.onClick = [this] { if (proc.selected >= 0) { model.markEdited (proc.selected); onChange(); } };
 
-    setupRow (fc, "Frecuencia");
-    setupRow (gain, "Ganancia");
-    setupRow (q, "Factor Q");
-    setupRow (slope, "Pendiente");
+    fc.setup (*this, "Frecuencia");
+    gain.setup (*this, "Ganancia");
+    q.setup (*this, "Factor Q");
+    slope.setup (*this, "Pendiente");
     for (Row* r : { &fc, &gain, &q, &slope })
+    {
+        r->slider.setDoubleClickReturnValue (false, 0.0);
         r->slider.onDragStart = [this] { if (proc.selected >= 0) model.markEdited (proc.selected); };
-    setupOut();
+    }
     refresh();
 }
 
-//── Salida ──
-int ControlsPanel::outIndex (int which) const
-{
-    const bool ms = proc.apvts.getRawParameterValue ("out_mode")->load() > 0.5f;
-    return (ms ? 2 : 0) + which;
-}
-
-RangedAudioParameter* ControlsPanel::outParam (int index) const
-{
-    const char* idsOut[] = { "out_l", "out_r", "out_m", "out_s" };
-    return proc.apvts.getParameter (idsOut[index]);
-}
-
-void ControlsPanel::setupOut()
-{
-    for (auto* b : { &outLr, &outMs }) addAndMakeVisible (b);
-    outLr.onClick = [this] { model.set ("out_mode", 0.0f); onChange(); };
-    outMs.onClick = [this] { model.set ("out_mode", 1.0f); onChange(); };
-    outLr.setTooltip (u8 ("Ganancia de salida de L y R"));
-    outMs.setTooltip (u8 ("Ganancia de salida de Mid y Side. Las dos parejas actúan siempre; el modo elige cuál se edita"));
-    outLink.getProperties().set ("accent", (int64) theme::accent.getARGB());
-    outLink.setTooltip (u8 ("Mover una ganancia mueve la otra lo mismo"));
-    addAndMakeVisible (outLink);
-    outLinkAtt = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "out_link", outLink);
-
-    int which = 0;
-    for (OutRow* r : { &outA, &outB })
-    {
-        r->which = which++;
-        auto& sl = r->slider;
-        sl.setSliderStyle (Slider::LinearHorizontal);
-        sl.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
-        sl.setRange (-24.0, 12.0, 0.1);
-        sl.setDoubleClickReturnValue (true, 0.0);
-        sl.getProperties().set ("thumb", (int64) theme::accent.getARGB());
-        sl.onDragStart = [this] { outDragging = true; outGestures (true); };
-        sl.onDragEnd = [this] { outGestures (false); outDragging = false; onChange(); };
-        sl.onValueChange = [this, r] { outValueChanged (*r); };
-        addAndMakeVisible (sl);
-    }
-}
-
-// Abre o cierra el gesto de las dos ganancias de la pareja visible (un solo paso de deshacer)
-void ControlsPanel::outGestures (bool begin)
-{
-    for (int w = 0; w < 2; ++w)
-    {
-        auto* p = outParam (outIndex (w));
-        if (begin) { outStart[outIndex (w)] = p->convertFrom0to1 (p->getValue()); p->beginChangeGesture(); }
-        else p->endChangeGesture();
-    }
-}
-
-void ControlsPanel::outValueChanged (OutRow& r)
-{
-    const bool wasDragging = outDragging;
-    if (! wasDragging) outGestures (true);   // doble clic (vuelve a 0 dB) o teclado
-    const int me = outIndex (r.which), other = outIndex (1 - r.which);
-    const float v = (float) r.slider.getValue();
-    auto* pm = outParam (me);
-    pm->setValueNotifyingHost (pm->convertTo0to1 (v));
-    if (proc.apvts.getRawParameterValue ("out_link")->load() > 0.5f)
-    {
-        auto* po = outParam (other);
-        const float ov = jlimit (-24.0f, 12.0f, std::round ((outStart[other] + v - outStart[me]) * 10.0f) / 10.0f);
-        po->setValueNotifyingHost (po->convertTo0to1 (ov));
-    }
-    if (! wasDragging) { outGestures (false); onChange(); }
-    syncOut();
-    repaint();
-}
-
-void ControlsPanel::syncOut()
-{
-    auto db = [this] (int i) { return proc.apvts.getRawParameterValue (i == 0 ? "out_l" : i == 1 ? "out_r" : i == 2 ? "out_m" : "out_s")->load(); };
-    const bool ms = outIndex (0) == 2;
-    outLr.setActive (! ms);
-    outMs.setActive (ms);
-    outA.name = ms ? "Mid" : "L";
-    outB.name = ms ? "Side" : "R";
-    for (OutRow* r : { &outA, &outB })
-    {
-        const float v = db (outIndex (r->which));
-        r->valueText = fmt::gain (v);
-        if (! outDragging) r->slider.setValue (v, dontSendNotification);
-    }
-    // La otra pareja también suena: se avisa si no está a 0 dB
-    const int o = ms ? 0 : 2;
-    const float a = db (o), b = db (o + 1);
-    String note;
-    if (a != 0.0f || b != 0.0f)
-        note = (ms ? u8 ("También activa en L/R: L ") : u8 ("También activa en M/S: Mid "))
-               + fmt::gain (a) + (ms ? u8 (" · R ") : u8 (" · Side ")) + fmt::gain (b);
-    outLr.setLive (ms && (a != 0.0f || b != 0.0f));
-    outMs.setLive (! ms && (a != 0.0f || b != 0.0f));
-    if (note != outNoteText) { outNoteText = note; resized(); }
-}
-
-void ControlsPanel::setupRow (Row& r, const String& name)
-{
-    r.name = name;
-    r.slider.setSliderStyle (Slider::LinearHorizontal);
-    r.slider.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
-    r.slider.setDoubleClickReturnValue (false, 0.0);
-    addAndMakeVisible (r.slider);
-}
-
-void ControlsPanel::bindBand()
+void BandPanel::bindBand()
 {
     const int sel = proc.selected;
     const auto b = sel >= 0 ? model.band (sel) : eq::Band();
@@ -239,20 +158,14 @@ void ControlsPanel::bindBand()
     onAtt = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, ids::set (sel, b.edit, "on"), onToggle);
 }
 
-void ControlsPanel::refresh()
+void BandPanel::refresh()
 {
     const int oldSlot = boundSlot, oldType = boundType;
     const bool oldHas = hasBand;
     bindBand();
-    const auto prm = model.params();
-
-    bool needLayout = oldSlot != boundSlot || oldType != boundType || oldHas != hasBand;
-    const String ct = String (model.count()) + " / " + String (eq::MAX_BANDS);
-    if (ct != countText) { countText = ct; needLayout = true; }
-
     if (hasBand)
     {
-        const auto& b = prm.bands[(size_t) boundSlot];
+        const auto b = model.band (boundSlot);
         const auto& p = b.sets[(size_t) b.edit];
         for (int t = 0; t < eq::NUM_TYPES; ++t) typeButtons[t]->setActive (t == b.type);
         for (int k = 0; k < eq::NUM_KEYS; ++k)
@@ -267,177 +180,222 @@ void ControlsPanel::refresh()
         slope.valueText = String (p.slope) + " dB/oct";
         for (Row* r : { &fc, &gain, &q, &slope }) r->slider.setAlpha (p.on ? 1.0f : 0.35f);
     }
-    syncOut();
-    const String note = u8 ("Filtro de fase cero de ") + String (prm.n + 1) + u8 (" muestras (diseñado con FFT de ")
-                        + String (2 * prm.n) + u8 ("), aplicado por convolución en particiones de ") + String (eq::PART)
-                        + u8 (" muestras. Latencia: ") + String (eq::latencyFor (prm.n)) + u8 (" muestras.");
-    if (note != engineNoteText) { engineNoteText = note; needLayout = true; }
-
-    if (needLayout) resized();
+    if (oldSlot != boundSlot || oldType != boundType || oldHas != hasBand) resized();
     repaint();
 }
 
-void ControlsPanel::layoutRow (Row& r, int x, int& y, int w, int gapAfter)
+void BandPanel::resized()
 {
-    r.label = { x, y, w, 14 };
-    r.slider.setBounds (x - 6, y + 16, w + 12, 14);
-    r.slider.setVisible (r.visible);
-    y += 16 + 14 + gapAfter;
-}
-
-void ControlsPanel::resized()
-{
-    const int w = getWidth();
-    int y = 0;
-    bandsTitle = { 0, y, w, 16 };
-    y += 26;
-    const int ch = chips.layoutHeight (w);
-    chips.setBounds (0, y, w, ch);
-    y += ch + 10;
-
-    const auto b = hasBand ? model.band (boundSlot) : eq::Band();
-    emptyHint = {};
-    bandBox = {};
+    const int pad = 12, w = getWidth(), iw = w - 2 * pad;
     for (auto* c : std::initializer_list<Component*> { &onToggle, &deleteButton }) c->setVisible (hasBand);
     for (auto* bt : typeButtons) bt->setVisible (hasBand);
     for (auto* bt : keyButtons) bt->setVisible (hasBand);
     for (Row* r : { &fc, &gain, &q, &slope }) r->slider.setVisible (false);
+    if (! hasBand) return;
 
-    if (! hasBand)
+    const auto b = model.band (boundSlot);
+    int y = 10;
+    headRow = { pad, y, iw, 16 };
+    deleteButton.setBounds (pad + iw - 104, y, 104, 16);
+    onToggle.setBounds (pad + iw - 104 - 12 - 62, y, 62, 16);
+    y += 28;
+
+    // Tipo y canal en la misma fila (si no caben, el canal baja)
+    typeLabel = { pad, y, 34, 15 };
+    int x = pad + 38;
+    for (auto* bt : typeButtons)
     {
-        emptyHint = { 2, y, w - 4, 52 };
-        y += 52 + 4;
+        const int bw = bt->getButtonText().length() * 6 + 12;
+        bt->setBounds (x, y, bw, 15);
+        x += bw + 3;
     }
-    else
+    int keysW = 0;
+    for (auto* bt : keyButtons) keysW += bt->getButtonText().length() * 6 + 12 + 3;
+    keysW += 4;
+    int kx = x + 20;
+    if (kx + 44 + keysW > pad + iw) { y += 22; kx = pad; }
+    keyLabel = { kx, y, 42, 15 };
+    kx += 46;
+    for (int k = 0; k < eq::NUM_KEYS; ++k)
     {
-        const int top = y, pad = 10, iw = w - 2 * pad;
-        y += pad;
-        headRow = { pad, y, iw, 16 };
-        onToggle.setBounds (pad + iw - 62, y, 62, 16);
-        y += 26;
-
-        // Tipo (con salto de línea si no cabe)
-        typeLabel = { pad, y, 34, 15 };
-        int x = pad + 38;
-        for (auto* bt : typeButtons)
-        {
-            const int bw = bt->getButtonText().length() * 6 + 12;
-            if (x + bw > pad + iw) { x = pad + 38; y += 18; }
-            bt->setBounds (x, y, bw, 15);
-            x += bw + 3;
-        }
-        y += 25;
-
-        // Canal
-        keyLabel = { pad, y, 40, 15 };
-        x = pad + iw;
-        for (int k = eq::NUM_KEYS; --k >= 0;)
-        {
-            auto* bt = keyButtons[k];
-            const int bw = bt->getButtonText().length() * 6 + 12;
-            x -= bw;
-            if (k == 2) x -= 4; // separación entre L/R y M/S
-            bt->setBounds (x, y, bw, 15);
-            x -= 3;
-        }
-        y += 25;
-
-        fc.visible = true;
-        gain.visible = eq::typeHasGain (b.type);
-        q.visible = eq::typeHasQ (b.type);
-        slope.visible = eq::typeHasSlope (b.type);
-        for (Row* r : { &fc, &gain, &q, &slope })
-            if (r->visible) layoutRow (*r, pad, y, iw, 12);
-            else r->label = {};
-        deleteButton.setBounds (pad, y, iw, 18);
-        y += 18 + pad;
-        bandBox = { 0, top, w, y - top };
-        y += 12;
+        auto* bt = keyButtons[k];
+        const int bw = bt->getButtonText().length() * 6 + 12;
+        if (k == 3) kx += 4; // separación entre L/R y M/S
+        bt->setBounds (kx, y, bw, 15);
+        kx += bw + 3;
     }
+    y += 30;
 
-    dividers[0] = { 0, y, w, 1 };
-    y += 13;
-    outTitle = { 0, y, w, 16 };
-    y += 26;
-    outModeLabel = { 0, y, 40, 15 };
-    outLr.setBounds (42, y, 34, 15);
-    outMs.setBounds (79, y, 34, 15);
-    outLink.setBounds (w - 70, y, 70, 16);
-    y += 25;
-    for (OutRow* r : { &outA, &outB })
-    {
-        r->label = { 0, y, w, 14 };
-        r->slider.setBounds (-6, y + 16, w + 12, 14);
-        y += 16 + 14 + 10;
-    }
-    outNote = {};
-    if (outNoteText.isNotEmpty()) { outNote = { 0, y, w, 26 }; y += 28; }
-    y += 2;
-    dividers[1] = { 0, y, w, 1 };
-    y += 13;
-    motorTitle = { 0, y, w, 16 };
-    y += 26;
-    engineNote = { 0, y, w, 48 };
-    y += 48;
-    contentHeight = y + 8;
-    if (getHeight() != contentHeight) setSize (w, contentHeight);
+    // Deslizadores en fila
+    fc.visible = true;
+    gain.visible = eq::typeHasGain (b.type);
+    q.visible = eq::typeHasQ (b.type);
+    slope.visible = eq::typeHasSlope (b.type);
+    std::vector<Row*> shown;
+    for (Row* r : { &fc, &gain, &q, &slope }) { if (r->visible) shown.push_back (r); else r->label = {}; }
+    const int gap = 20, cols = 3;
+    const int colW = (iw - gap * (cols - 1)) / cols;
+    for (size_t i = 0; i < shown.size(); ++i) shown[i]->place (pad + (int) i * (colW + gap), y, colW);
 }
 
-void ControlsPanel::paint (Graphics& g)
+void BandPanel::paint (Graphics& g)
 {
-    panelTitle (g, bandsTitle, "BANDAS");
-    g.setColour (theme::muted);
-    g.drawText (countText, bandsTitle, Justification::centredRight, false);
-
-    if (! emptyHint.isEmpty())
+    if (! hasBand)
     {
+        paintPanelFrame (g, getLocalBounds(), theme::muted);
         g.setColour (theme::muted.withAlpha (0.8f));
         g.setFont (theme::font (10.0f));
-        g.drawFittedText (u8 ("Doble clic en la gráfica para crear un punto del tipo elegido arriba.\n"
-                              "Clic derecho en la gráfica para elegir el tipo en el momento."),
-                          emptyHint, Justification::topLeft, 4, 1.0f);
+        g.drawFittedText (u8 ("Ninguna banda seleccionada.\nDoble clic en la gráfica para crear un punto del tipo elegido arriba; "
+                              "clic derecho para elegir el tipo en el momento."),
+                          getLocalBounds().reduced (16), Justification::centred, 3, 1.0f);
+        return;
     }
-
-    if (hasBand)
-    {
-        const auto b = model.band (boundSlot);
-        const Colour col = ui::bandColour (boundSlot);
-        auto r = bandBox.toFloat().reduced (0.5f);
-        g.setColour (col.withAlpha (0x0d / 255.0f));
-        g.fillRoundedRectangle (r, 4.0f);
-        g.setColour (col.withAlpha (0x55 / 255.0f));
-        g.drawRoundedRectangle (r, 4.0f, 0.6f);
-
-        g.setColour (col);
-        g.fillEllipse ((float) headRow.getX(), (float) headRow.getCentreY() - 5, 10, 10);
-        g.setColour (theme::text);
-        g.setFont (theme::font (10.0f));
-        g.drawText ("Banda " + String (model.number (boundSlot)) + u8 (" · ") + ui::TYPE_LABEL[b.type],
-                    headRow.withTrimmedLeft (18).withTrimmedRight (66), Justification::centredLeft, true);
-        g.setColour (theme::muted);
-        g.setFont (theme::font (9.0f));
-        g.drawText ("TIPO", typeLabel, Justification::centredLeft, false);
-        g.drawText ("CANAL", keyLabel, Justification::centredLeft, false);
-
-        const float alpha = b.sets[(size_t) b.edit].on ? 1.0f : 0.35f;
-        for (const Row* row : { &fc, &gain, &q, &slope })
-        {
-            if (! row->visible || row->label.isEmpty()) continue;
-            g.setFont (theme::font (10.0f));
-            g.setColour (theme::muted.withMultipliedAlpha (alpha));
-            g.drawText (row->name, row->label, Justification::centredLeft, true);
-            g.setColour (col.withMultipliedAlpha (alpha));
-            g.drawText (row->valueText, row->label, Justification::centredRight, true);
-        }
-    }
-
-    g.setColour (theme::border);
-    for (auto& d : dividers) g.fillRect ((float) d.getX(), (float) d.getY(), (float) d.getWidth(), 0.6f);
-
-    panelTitle (g, outTitle, "SALIDA");
+    const auto b = model.band (boundSlot);
+    const Colour col = ui::bandColour (boundSlot);
+    paintPanelFrame (g, getLocalBounds(), col);
+    g.setColour (col);
+    g.fillEllipse ((float) headRow.getX(), (float) headRow.getCentreY() - 5, 10, 10);
+    g.setColour (theme::text);
+    g.setFont (theme::font (10.0f));
+    g.drawText ("Banda " + String (model.number (boundSlot)) + u8 (" · ") + ui::TYPE_LABEL[b.type],
+                headRow.withTrimmedLeft (18).withTrimmedRight (190), Justification::centredLeft, true);
     g.setColour (theme::muted);
     g.setFont (theme::font (9.0f));
-    g.drawText ("EDITAR", outModeLabel, Justification::centredLeft, false);
+    g.drawText ("TIPO", typeLabel, Justification::centredLeft, false);
+    g.drawText ("CANAL", keyLabel, Justification::centredLeft, false);
+
+    const float alpha = b.sets[(size_t) b.edit].on ? 1.0f : 0.35f;
+    for (const Row* row : { &fc, &gain, &q, &slope })
+    {
+        if (! row->visible || row->label.isEmpty()) continue;
+        g.setFont (theme::font (10.0f));
+        g.setColour (theme::muted.withMultipliedAlpha (alpha));
+        g.drawText (row->name, row->label, Justification::centredLeft, true);
+        g.setColour (col.withMultipliedAlpha (alpha));
+        g.drawText (row->valueText, row->label, Justification::centredRight, true);
+    }
+}
+
+//==============================================================================
+OutputPanel::OutputPanel (ExcellecuProcessor& p, ui::BandModel& m, std::function<void()> cb)
+    : proc (p), model (m), onChange (std::move (cb))
+{
+    for (auto* b : { &outLr, &outMs }) addAndMakeVisible (b);
+    outLr.onClick = [this] { model.set ("out_mode", 0.0f); onChange(); };
+    outMs.onClick = [this] { model.set ("out_mode", 1.0f); onChange(); };
+    outLr.setTooltip (u8 ("Ganancia de salida de L y R"));
+    outMs.setTooltip (u8 ("Ganancia de salida de Mid y Side. Las dos parejas actúan siempre; el modo elige cuál se edita"));
+    outLink.getProperties().set ("accent", (int64) theme::accent.getARGB());
+    outLink.setTooltip (u8 ("Mover una ganancia mueve la otra lo mismo"));
+    addAndMakeVisible (outLink);
+    outLinkAtt = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "out_link", outLink);
+
+    int which = 0;
+    for (OutRow* r : { &outA, &outB })
+    {
+        r->which = which++;
+        r->setup (*this, "");
+        auto& sl = r->slider;
+        sl.setRange (-24.0, 12.0, 0.1);
+        sl.setDoubleClickReturnValue (true, 0.0);
+        sl.getProperties().set ("thumb", (int64) theme::accent.getARGB());
+        sl.onDragStart = [this] { dragging = true; gestures (true); };
+        sl.onDragEnd = [this] { gestures (false); dragging = false; onChange(); };
+        sl.onValueChange = [this, r] { valueChanged (*r); };
+    }
+    refresh();
+}
+
+int OutputPanel::outIndex (int which) const
+{
+    const bool ms = proc.apvts.getRawParameterValue ("out_mode")->load() > 0.5f;
+    return (ms ? 2 : 0) + which;
+}
+
+RangedAudioParameter* OutputPanel::outParam (int index) const
+{
+    const char* idsOut[] = { "out_l", "out_r", "out_m", "out_s" };
+    return proc.apvts.getParameter (idsOut[index]);
+}
+
+// Abre o cierra el gesto de las dos ganancias de la pareja visible (un solo paso de deshacer)
+void OutputPanel::gestures (bool begin)
+{
+    for (int w = 0; w < 2; ++w)
+    {
+        auto* p = outParam (outIndex (w));
+        if (begin) { start[outIndex (w)] = p->convertFrom0to1 (p->getValue()); p->beginChangeGesture(); }
+        else p->endChangeGesture();
+    }
+}
+
+void OutputPanel::valueChanged (OutRow& r)
+{
+    const bool wasDragging = dragging;
+    if (! wasDragging) gestures (true);   // doble clic (vuelve a 0 dB) o teclado
+    const int me = outIndex (r.which), other = outIndex (1 - r.which);
+    const float v = (float) r.slider.getValue();
+    auto* pm = outParam (me);
+    pm->setValueNotifyingHost (pm->convertTo0to1 (v));
+    if (proc.apvts.getRawParameterValue ("out_link")->load() > 0.5f)
+    {
+        auto* po = outParam (other);
+        const float ov = jlimit (-24.0f, 12.0f, std::round ((start[other] + v - start[me]) * 10.0f) / 10.0f);
+        po->setValueNotifyingHost (po->convertTo0to1 (ov));
+    }
+    if (! wasDragging) { gestures (false); onChange(); }
+    refresh();
+}
+
+void OutputPanel::refresh()
+{
+    auto db = [this] (int i) { return proc.apvts.getRawParameterValue (i == 0 ? "out_l" : i == 1 ? "out_r" : i == 2 ? "out_m" : "out_s")->load(); };
+    const bool ms = outIndex (0) == 2;
+    outLr.setActive (! ms);
+    outMs.setActive (ms);
+    outA.name = ms ? "Mid" : "L";
+    outB.name = ms ? "Side" : "R";
+    for (OutRow* r : { &outA, &outB })
+    {
+        const float v = db (outIndex (r->which));
+        r->valueText = fmt::gain (v);
+        if (! dragging) r->slider.setValue (v, dontSendNotification);
+    }
+    // La otra pareja también suena: se avisa si no está a 0 dB
+    const int o = ms ? 0 : 2;
+    const float a = db (o), b = db (o + 1);
+    String n;
+    if (a != 0.0f || b != 0.0f)
+        n = (ms ? u8 ("También activa en L/R: L ") : u8 ("También activa en M/S: Mid "))
+            + fmt::gain (a) + (ms ? u8 (" · R ") : u8 (" · Side ")) + fmt::gain (b);
+    outLr.setLive (ms && (a != 0.0f || b != 0.0f));
+    outMs.setLive (! ms && (a != 0.0f || b != 0.0f));
+    noteText = n;
+    repaint();
+}
+
+void OutputPanel::resized()
+{
+    const int pad = 12, w = getWidth(), iw = w - 2 * pad;
+    int y = 10;
+    title = { pad, y, 60, 16 };
+    outLr.setBounds (pad + 62, y, 34, 15);
+    outMs.setBounds (pad + 99, y, 34, 15);
+    outLink.setBounds (pad + iw - 70, y, 70, 16);
+    y += 28;
+    outA.place (pad, y, iw);
+    y += 36;
+    outB.place (pad, y, iw);
+    y += 36;
+    note = { pad, y, iw, getHeight() - y - 6 };
+}
+
+void OutputPanel::paint (Graphics& g)
+{
+    paintPanelFrame (g, getLocalBounds(), theme::accent);
+    g.setColour (theme::text);
+    g.setFont (theme::font (10.0f));
+    g.drawText ("Salida", title, Justification::centredLeft, false);
     for (const OutRow* row : { &outA, &outB })
     {
         g.setFont (theme::font (10.0f));
@@ -446,39 +404,27 @@ void ControlsPanel::paint (Graphics& g)
         g.setColour (row->slider.getValue() != 0.0 ? theme::accent : theme::muted);
         g.drawText (row->valueText, row->label, Justification::centredRight, true);
     }
-    if (! outNote.isEmpty())
+    if (noteText.isNotEmpty())
     {
         g.setColour (theme::warn.withAlpha (0.85f));
         g.setFont (theme::font (9.0f));
-        g.drawFittedText (outNoteText, outNote, Justification::topLeft, 2, 1.0f);
+        g.drawFittedText (noteText, note, Justification::topLeft, 2, 1.0f);
     }
-
-    panelTitle (g, motorTitle, "MOTOR");
-    g.setColour (theme::muted.withAlpha (0.8f));
-    g.setFont (theme::font (9.0f));
-    g.drawFittedText (engineNoteText, engineNote, Justification::topLeft, 5, 1.0f);
 }
 
 //==============================================================================
 ExcellecuEditor::ExcellecuEditor (ExcellecuProcessor& p)
     : AudioProcessorEditor (&p), proc (p), model (p),
-      controls (p, model, [this] { refreshNow(); }),
+      chips (model, [this] { refreshNow(); }),
+      bandPanel (p, model, [this] { refreshNow(); }),
+      outPanel (p, model, [this] { refreshNow(); }),
       mag (model, [this] { refreshNow(); }),
-      phase (model),
       presetBar (p, [this] { refreshNow(); }),
       meters (p)
 {
     setLookAndFeel (&lnf);
-    viewport.setViewedComponent (&controls, false);
-    viewport.setScrollBarsShown (true, false);
-    viewport.setScrollBarThickness (6);
-    addAndMakeVisible (viewport);
-    addAndMakeVisible (mag);
-    addAndMakeVisible (phase);
+    for (auto* c : std::initializer_list<Component*> { &chips, &bandPanel, &outPanel, &mag, &presetBar, &meters }) addAndMakeVisible (c);
     mag.setData (&chart);
-    phase.setData (&chart);
-    addAndMakeVisible (presetBar);
-    addAndMakeVisible (meters);
 
     for (int t = 0; t < eq::NUM_TYPES; ++t)
     {
@@ -487,11 +433,18 @@ ExcellecuEditor::ExcellecuEditor (ExcellecuProcessor& p)
         b->onClick = [this, t] { proc.newBandType = t; refreshNow(); };
         addAndMakeVisible (b);
     }
+    for (int z : MagChart::ZOOMS)
+    {
+        auto* b = zoomButtons.add (new MsButton (u8 ("±") + String (z)));
+        b->setTooltip (u8 ("Escala vertical: ±") + String (z) + " dB");
+        b->onClick = [this, z] { mag.setZoomDb (z); refreshNow(); };
+        addAndMakeVisible (b);
+    }
 
     setWantsKeyboardFocus (true);
     setResizable (true, true);
-    setResizeLimits (900, 620, 2000, 1600);
-    setSize (1100, 780);
+    setResizeLimits (960, 760, 2400, 1800);
+    setSize (1120, 1000);
     constructed = true;
     refreshNow();
     startTimerHz (30);
@@ -506,8 +459,15 @@ void ExcellecuEditor::refreshNow()
     if (! constructed) return;
     if (proc.selected >= 0 && ! model.used (proc.selected)) proc.selected = -1;
     for (int t = 0; t < eq::NUM_TYPES; ++t) newTypeButtons[t]->setActive (t == proc.newBandType);
-    controls.refresh();
+    for (int i = 0; i < zoomButtons.size(); ++i) zoomButtons[i]->setActive (MagChart::ZOOMS[i] == mag.zoomDb());
+    bandPanel.refresh();
+    outPanel.refresh();
     presetBar.refresh();
+
+    // Los chips pueden ocupar más o menos filas: si cambia su alto, se recoloca la gráfica
+    const int ch = chips.layoutHeight (jmax (100, magPanel.getWidth() - 20));
+    if (ch != shownChipsH) { shownChipsH = ch; layoutMagHeader(); }
+    chips.repaint();
 
     const auto prm = proc.currentParams();
     const double sr = proc.sampleRateForUi();
@@ -520,16 +480,17 @@ void ExcellecuEditor::refreshNow()
         shownParams = prm; shownRate = sr; shownWidth = w;
         chart.compute (prm, sr, w);
         const int lat = eq::latencyFor (prm.n);
+        const bool phaseOk = chart.maxErr < 0.01;
         status = u8 ("latencia ") + String (lat) + " muestras (" + String (1000.0 * lat / sr, 1) + u8 (" ms) · ")
                + u8 ("filtro de ") + String (prm.n + 1) + u8 (", particiones de ") + String (eq::PART)
-               + u8 (" · ") + String (sr / 1000.0, 1) + " kHz";
+               + u8 (" · ") + String (sr / 1000.0, 1) + u8 (" kHz · ")
+               + (phaseOk ? u8 ("fase lineal ✓") : u8 ("desplazamiento de fase ") + String (chart.maxErr, 3) + u8 ("°"));
         repaint();
     }
     if (changed || shownSelected != proc.selected)
     {
         shownSelected = proc.selected;
         mag.repaint();
-        phase.repaint();
     }
 }
 
@@ -592,11 +553,11 @@ void ExcellecuEditor::paint (Graphics& g)
     g.setColour (theme::text);
     g.drawText (u8 ("ECUALIZADOR — BANDA PARAMÉTRICA GAUSSIANA"), header.withTrimmedLeft (104), Justification::centredLeft, false);
     g.setFont (theme::font (10.0f));
-    g.setColour (theme::accent2);
+    g.setColour (chart.maxErr < 0.01 ? theme::accent2 : theme::warn);
     g.drawText (status, header.withTrimmedRight (16), Justification::centredRight, false);
 
-    // Marcos de las gráficas
-    for (auto pr : { magPanel, phasePanel, meterPanel })
+    // Marcos de la gráfica y de los medidores
+    for (auto pr : { magPanel, meterPanel })
     {
         g.setColour (Colours::white.withAlpha (0.02f));
         g.fillRoundedRectangle (pr.toFloat().reduced (0.5f), 4.0f);
@@ -605,53 +566,22 @@ void ExcellecuEditor::paint (Graphics& g)
     }
     auto magTitle = magPanel.reduced (10).withHeight (16);
     panelTitle (g, magTitle, "MAGNITUD");
+    panelTitle (g, meterPanel.reduced (10).withHeight (16), "NIVEL");
     g.setColour (theme::muted);
     g.setFont (theme::font (9.0f));
+    g.drawText ("ESCALA", zoomLabel, Justification::centredRight, false);
     g.drawText ("NUEVO PUNTO", Rectangle<int> (newTypeButtons[0]->getX() - 80, magTitle.getY(), 76, 16), Justification::centredRight, false);
-
-    panelTitle (g, meterPanel.reduced (10).withHeight (16), "NIVEL");
-
-    auto phTitle = phasePanel.reduced (10).withHeight (16);
-    panelTitle (g, phTitle, "FASE");
-    {
-        const bool ok = chart.maxErr < 0.01;
-        const String pre = chart.multiRole ? u8 ("L·R·M·S · ") : String();
-        const String t = pre + (ok ? u8 ("sin desplazamiento ✓") : u8 ("desplazamiento: ") + String (chart.maxErr, 3) + u8 ("°"));
-        const Colour c = ok ? theme::accent2 : theme::warn;
-        g.setFont (theme::font (9.0f));
-        const float w = GlyphArrangement::getStringWidth (g.getCurrentFont(), t) + 12;
-        auto badge = Rectangle<float> ((float) phTitle.getX() + 40, (float) phTitle.getY(), w, 16.0f);
-        g.setColour (c.withAlpha (0.12f)); g.fillRoundedRectangle (badge, 3.0f);
-        g.setColour (c.withAlpha (0.3f)); g.drawRoundedRectangle (badge, 3.0f, 0.6f);
-        g.setColour (c); g.drawText (t, badge, Justification::centred, false);
-    }
 
     g.setColour (theme::muted.withAlpha (0.7f));
     g.setFont (theme::font (9.0f));
     g.drawFittedText (u8 ("Doble clic = crear punto · clic derecho = elegir tipo / eliminar · arrastrar = frecuencia ↔ / ganancia ↕ · "
-                          "Mayús ↕ = Q / pendiente · Alt (⌥) = fino · rueda = Q / pendiente · Supr = eliminar"),
+                          "Mayús ↕ = Q / pendiente · Alt (⌥) = fino · rueda = Q / pendiente · Supr = eliminar · ⌘Z / Ctrl+Z = deshacer"),
                       helpArea, Justification::topLeft, 2, 1.0f);
 }
 
-void ExcellecuEditor::resized()
+// Cabecera de la gráfica: título, escala, tipo de punto nuevo; debajo, los chips de bandas
+void ExcellecuEditor::layoutMagHeader()
 {
-    moduleArea = getLocalBounds().reduced (24).withTrimmedTop (36);
-    auto body = moduleArea.withTrimmedTop (39).reduced (16);
-    auto left = body.removeFromLeft (panelW + 8);
-    body.removeFromLeft (8);
-    viewport.setBounds (left);
-    presetBar.setBounds (getWidth() - 24 - PresetBar::idealWidth, 14, PresetBar::idealWidth, 28);
-    meterPanel = body.removeFromRight (104);
-    body.removeFromRight (12);
-    meters.setBounds (meterPanel.reduced (8).withTrimmedTop (28));
-    controls.setSize (panelW, controls.idealHeight());
-    controls.resized();
-
-    const int magH = (int) (body.getHeight() * 0.62);
-    magPanel = body.removeFromTop (magH);
-    body.removeFromTop (12);
-    phasePanel = body;
-
     auto mi = magPanel.reduced (10);
     auto titleRow = mi.removeFromTop (16);
     int x = titleRow.getRight();
@@ -663,12 +593,44 @@ void ExcellecuEditor::resized()
         b->setBounds (x, titleRow.getY(), bw, 15);
         x -= 3;
     }
+    int zx = titleRow.getX() + 90 + 50;
+    zoomLabel = { titleRow.getX() + 90, titleRow.getY(), 46, 16 };
+    for (auto* b : zoomButtons)
+    {
+        const int bw = b->getButtonText().length() * 6 + 10;
+        b->setBounds (zx, titleRow.getY(), bw, 15);
+        zx += bw + 3;
+    }
     mi.removeFromTop (10);
+    const int ch = chips.layoutHeight (mi.getWidth());
+    shownChipsH = ch;
+    chips.setBounds (mi.removeFromTop (ch));
+    mi.removeFromTop (8);
     helpArea = mi.removeFromBottom (26).withTrimmedTop (6);
     mag.setBounds (mi);
+    repaint();
+}
 
-    auto pi = phasePanel.reduced (10);
-    pi.removeFromTop (26);
-    phase.setBounds (pi);
+void ExcellecuEditor::resized()
+{
+    moduleArea = getLocalBounds().reduced (24).withTrimmedTop (36);
+    auto body = moduleArea.withTrimmedTop (39).reduced (16);
+    presetBar.setBounds (getWidth() - 24 - PresetBar::idealWidth, 14, PresetBar::idealWidth, 28);
+
+    meterPanel = body.removeFromRight (104);
+    body.removeFromRight (12);
+    meters.setBounds (meterPanel.reduced (8).withTrimmedTop (28));
+
+    // Debajo de la gráfica: la banda y la salida, una al lado de la otra
+    auto strip = body.removeFromBottom (140);
+    body.removeFromBottom (12);
+    outArea = strip.removeFromRight (jmax (260, (int) (strip.getWidth() * 0.3)));
+    strip.removeFromRight (12);
+    bandArea = strip;
+    bandPanel.setBounds (bandArea);
+    outPanel.setBounds (outArea);
+
+    magPanel = body;
+    layoutMagHeader();
     refreshNow();
 }

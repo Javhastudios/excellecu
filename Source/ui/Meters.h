@@ -1,9 +1,11 @@
 // Medidores de entrada (antes del EQ) y salida (después de la ganancia de salida).
 // Por canal: pico (barra clara, caída de 20 dB/s), RMS de ~300 ms (barra oscura), pico
 // retenido 1,5 s y piloto de saturación (≥ 0 dBFS) que se queda encendido hasta hacer clic.
+// RMS: AES-17 (por defecto, +3,01 dB: un seno marca lo mismo en pico y en RMS) o sin ponderar.
 #pragma once
 
 #include "PluginProcessor.h"
+#include "Theme.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -27,12 +29,19 @@ public:
     };
     const Channel& channel (int group, int c) const { return groups[(size_t) group][(size_t) c]; }
     void tick();   // recoge del procesador (lo llama el temporizador; público para las pruebas)
+    void resized() override;
+
+    static constexpr float AES17_OFFSET = 3.0103f;   // 20·log10(√2)
+    bool aes17() const;
+    void setAes17 (bool on);
+    float shownRms (const Channel& c) const { return c.rmsDb + (aes17() ? AES17_OFFSET : 0.0f); }
 
 private:
     void timerCallback() override { tick(); }
     float yFor (float db, juce::Rectangle<float> bar) const;
 
     ExcellecuProcessor& proc;
+    MsButton aesButton { "AES-17" }, flatButton { "Sin ponderar" };
     std::array<std::array<Channel, 2>, 2> groups;   // [entrada/salida][canal]
     int channels = 2;
     double lastTick = 0;

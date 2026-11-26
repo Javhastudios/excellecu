@@ -12,6 +12,26 @@ Original: `web/eq-dft-proto.html` (ahora v0.21). Objetivo: medirlo en Plugin Doc
 iterando. **Acuerdo (26/11/2026): cada avance del plugin se hace también en el HTML**, que Javier
 guarda como archivo; el HTML conserva además los motores Clásico, la ventana y el overlap.
 
+## v0.22 (26/11/2026): nueva disposición, escala vertical y RMS AES-17
+
+- Ventana sin gráfica de fase (queda "fase lineal ✓" en la barra de estado; la comprobación sigue
+  en `ChartData`). Gráfica de magnitud a todo lo ancho y casi el doble de alta: ventana por defecto
+  1120×1000 (mínimo 960×760), lienzo de ~560 px (antes ~315). Chips de bandas en la cabecera de
+  la gráfica. Debajo, `BandPanel` (cabecera, tipo y canal en una fila, deslizadores en fila) y
+  `OutputPanel`, uno al lado del otro. Medidores a la derecha. Desaparece la columna izquierda
+  (`ControlsPanel` y su barra de desplazamiento) y la nota del motor (ya está en la barra de estado).
+- Escala vertical ±3 / ±6 / ±12 / ±24 dB (por defecto ±12), con un 10 % de margen; rejilla cada
+  1 / 2 / 3 / 6 dB. Arrastrar en vertical es proporcionalmente más fino con más zoom. Se guarda con
+  la sesión (`zoomDb` en el estado).
+- Medidores: selector RMS AES-17 (por defecto, +3,01 dB) / sin ponderar, guardado con la sesión
+  (`rmsAes17`). El pico y la saturación no cambian.
+- Web v0.22: misma disposición; lienzo de 320 px (antes 160); debajo, tira propia de la web
+  (señal de prueba, procesar, motor) y la fase plegada en "Fase (diagnóstico)" hasta el final del
+  desarrollo. Escala y modo RMS se recuerdan en el navegador.
+- Pruebas: humo (AES-17 por defecto y sin ponderar, escala guardada, capturas 07 escala ±3 y
+  08 tamaño mínimo) y Chrome (gráfica 320 px con la banda debajo, fase plegada que se despliega,
+  escalas ±3/±24, selector RMS).
+
 ## v0.21 (26/11/2026): funciones para la beta
 
 - **Ganancia de salida L/R–M/S** (sección "Salida" del panel). Parámetros `out_l`, `out_r`, `out_m`,
@@ -154,11 +174,7 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
 
 ## Pendiente / ideas
 
-- **v0.22 (acordado el 26/11/2026):** quitar la gráfica de fase ("fase lineal ✓" en la barra de
-  estado); gráfica de magnitud a todo lo ancho y el doble de alta; debajo, banda (deslizadores en
-  fila) y salida una al lado de la otra; chips de bandas en la cabecera de la gráfica; medidores a
-  la derecha con selector RMS AES-17 / sin ponderar (por defecto AES-17). En plugin y web.
-  Por decidir: fase plegada como diagnóstico en la web; zoom vertical ±3/±6/±12 dB.
+- Quitar la fase plegada de la web al final del desarrollo.
 - Confirmar el canal de la banda 3 de la TDM (Side o Mid).
 
 - EQ: codo suave en HPF/LPF; high shelf cerca de Nyquist (−0,3 dB a 20 kHz frente a la TDM del

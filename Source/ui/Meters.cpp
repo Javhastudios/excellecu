@@ -14,7 +14,31 @@ MeterView::MeterView (ExcellecuProcessor& p) : proc (p)
     setTooltip (String::fromUTF8 ("Pico (claro) y RMS (oscuro). Clic: borra saturación y máximos"));
     // Con la ventana cerrada la cola se llena y deja de admitir bloques: lo que quede es viejo
     for (auto* m : { &proc.inMeter, &proc.outMeter }) for (auto& c : *m) c.collect();
+    aesButton.setTooltip (String::fromUTF8 ("RMS según AES-17: +3,01 dB, un seno marca lo mismo en pico y en RMS"));
+    flatButton.setTooltip (String::fromUTF8 ("RMS tal cual: un seno marca 3 dB por debajo de su pico"));
+    aesButton.onClick = [this] { setAes17 (true); };
+    flatButton.onClick = [this] { setAes17 (false); };
+    addAndMakeVisible (aesButton);
+    addAndMakeVisible (flatButton);
+    setAes17 (aes17());
     startTimerHz (30);
+}
+
+bool MeterView::aes17() const { return proc.apvts.state.getProperty ("rmsAes17", true); }
+
+void MeterView::setAes17 (bool on)
+{
+    proc.apvts.state.setProperty ("rmsAes17", on, nullptr);   // se guarda con la sesión
+    aesButton.setActive (on);
+    flatButton.setActive (! on);
+    repaint();
+}
+
+void MeterView::resized()
+{
+    const int w = getWidth(), h = getHeight();
+    aesButton.setBounds (0, h - 36, w, 15);
+    flatButton.setBounds (0, h - 17, w, 15);
 }
 
 void MeterView::tick()
@@ -62,7 +86,7 @@ float MeterView::yFor (float db, Rectangle<float> bar) const
 
 void MeterView::paint (Graphics& g)
 {
-    auto area = getLocalBounds().toFloat();
+    auto area = getLocalBounds().toFloat().withTrimmedBottom (42);   // abajo, el selector de RMS
     const float titleH = 16, ledH = 6, numH = 26;
     const float scaleW = 20;
     const float groupW = (area.getWidth() - scaleW) / 2;
@@ -121,7 +145,8 @@ void MeterView::paint (Graphics& g)
             };
             const Colour base = gi == 0 ? theme::accent2 : theme::accent;
             fill (ch.peakDb, (ch.peakDb > 0 ? Colour (0xffff4d4d) : base).withAlpha (0.45f));
-            fill (ch.rmsDb, (ch.rmsDb > 0 ? Colour (0xffff4d4d) : base).withAlpha (0.85f));
+            const float rms = shownRms (ch);
+            fill (rms, (rms > 0 ? Colour (0xffff4d4d) : base).withAlpha (0.85f));
             if (ch.holdDb > DB_MIN)
             {
                 g.setColour (ch.holdDb > 0 ? Colour (0xffff4d4d) : theme::text.withAlpha (0.8f));

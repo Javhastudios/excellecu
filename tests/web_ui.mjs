@@ -45,6 +45,27 @@ await page.keyboard.press('Control+Shift+z');
 await page.keyboard.press('Control+y');
 check(await page.evaluate((fc) => bands.length === 1 && Math.abs(bands[0].sets.st.fc - fc) < 1e-6, afterDrag.fc), 'rehacer recupera banda y arrastre');
 
+// ── v0.22: disposición, escala y fase plegada ──
+const lay = await page.evaluate(() => {
+  const mag = document.getElementById('cMag').getBoundingClientRect();
+  const band = document.getElementById('band-box').getBoundingClientRect();
+  const det = document.getElementById('phase-details');
+  return { magH: mag.height, magW: mag.width, bandTop: band.top, magBottom: mag.bottom, phaseOpen: det.open };
+});
+check(lay.magH >= 300 && lay.bandTop > lay.magBottom, 'gráfica de 320 px y la banda debajo (' + Math.round(lay.magH) + ' px)');
+check(!lay.phaseOpen, 'la fase arranca plegada');
+await page.click('#phase-details summary');
+await page.waitForTimeout(50);
+check(await page.evaluate(() => document.getElementById('phase-details').open && document.getElementById('cPhase').width > 0), 'la fase se despliega y se dibuja');
+await page.click('#phase-details summary');
+await page.click('#zoom-3');
+let zr = await page.evaluate(() => { const G = magGeom(); return { z: magZoom, top: G.fromY(G.PAD.t), act: document.getElementById('zoom-3').classList.contains('ms-active') }; });
+check(zr.z === 3 && Math.abs(zr.top - 3.3) < 1e-6 && zr.act, 'escala ±3 dB (arriba +3,3 dB con el margen)');
+await page.click('#zoom-24');
+zr = await page.evaluate(() => { const G = magGeom(); return G.fromY(G.PAD.t + G.ph); });
+check(Math.abs(zr + 26.4) < 1e-6, 'escala ±24 dB');
+await page.click('#zoom-12');
+
 // ── salida ──
 await page.click('#out-ms');
 await page.$eval('#sl-out-b', el => { el.dispatchEvent(new Event('pointerdown')); el.value = 2; el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -127,7 +148,13 @@ check(mt.playing && Math.abs(mt.inL - 20 * Math.log10(0.9)) < 0.5, 'medidor de e
 check(Math.abs(mt.outL - (20 * Math.log10(0.9) + 3)) < 0.6 && mt.clip && !mt.inClip, 'salida L ≈ +2,1 dBFS con +3 dB: saturación solo en la salida');
 check(Math.abs(mt.outR - 20 * Math.log10(0.5)) < 0.5, 'salida R ≈ −6 dBFS');
 check(Math.abs(mt.rmsR - 20 * Math.log10(0.5 / Math.SQRT2)) < 0.1, 'RMS de salida R ≈ −9,03 dBFS (' + mt.rmsR.toFixed(2) + ')');
-await page.screenshot({ path: outDir + '/web_v021.png', fullPage: false, clip: { x: 0, y: 280, width: 1300, height: 760 } });
+await page.evaluate(() => { selectedId = bands[3].id; syncPanel(); updateCharts(); });
+await page.waitForTimeout(50);
+await page.screenshot({ path: outDir + '/web_v022.png', fullPage: false, clip: { x: 0, y: 280, width: 1300, height: 960 } });
+check(await page.evaluate(() => rmsAes && document.getElementById('rms-aes').classList.contains('ms-active')), 'RMS en AES-17 por defecto');
+await page.click('#rms-flat');
+check(await page.evaluate(() => !rmsAes && localStorage.getItem('excellecu.rmsAes') === '0'), 'RMS sin ponderar (se recuerda)');
+await page.click('#rms-aes');
 await page.click('#btn-proc');
 await page.click('#cMeter');
 check(await page.evaluate(() => !meters.out[0].clip), 'clic en el medidor borra la saturación');

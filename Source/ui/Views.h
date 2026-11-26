@@ -42,12 +42,18 @@ public:
     struct Geom
     {
         float W, H, l = 40, r = 8, t = 8, b = 24, pw, ph;
+        double lo = -13.2, hi = 13.2;   // dB visibles (la escala elegida más un 10 % de margen)
         float toX (double f) const;
         double fromX (float x) const;
         float toY (double db) const;
         double fromY (float y) const;
     };
     Geom geom() const;
+
+    // Escala vertical: ±3, ±6, ±12 o ±24 dB (se guarda con la sesión)
+    static constexpr int ZOOMS[] = { 3, 6, 12, 24 };
+    int zoomDb() const;
+    void setZoomDb (int db);
 
 private:
     struct Handle { int slot, key; eq::BandSet p; int type; float x, y; bool editing, selected; };
