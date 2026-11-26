@@ -12,6 +12,8 @@ String dbText (float db) { return db <= -99 ? String::fromUTF8 ("−∞") : (db 
 MeterView::MeterView (ExcellecuProcessor& p) : proc (p)
 {
     setTooltip (String::fromUTF8 ("Pico (claro) y RMS (oscuro). Clic: borra saturación y máximos"));
+    // Con la ventana cerrada la cola se llena y deja de admitir bloques: lo que quede es viejo
+    for (auto* m : { &proc.inMeter, &proc.outMeter }) for (auto& c : *m) c.collect();
     startTimerHz (30);
 }
 
@@ -26,9 +28,9 @@ void MeterView::tick()
         {
             auto& m = (g == 0 ? proc.inMeter : proc.outMeter)[(size_t) c];
             auto& ch = groups[(size_t) g][(size_t) c];
-            const float pk = m.peak.exchange (0.0f);
-            const float ss = m.sumSq.exchange (0.0f);
-            const int n = m.count.exchange (0);
+            const auto blk = m.collect();
+            const float pk = blk.peak, ss = blk.sumSq;
+            const int n = blk.count;
             ch.ss[(size_t) ch.pos] = ss;
             ch.n[(size_t) ch.pos] = n;
             ch.pos = (ch.pos + 1) % (int) ch.ss.size();

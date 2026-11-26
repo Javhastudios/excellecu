@@ -64,12 +64,17 @@ public:
     // Deshacer / rehacer (solo cambios hechos desde la interfaz)
     UndoHistory history;
 
-    // Medidores: el audio acumula pico y suma de cuadrados; la interfaz los recoge y los pone a 0
+    // Medidores: por cada bloque, el audio deja en una cola sin bloqueos su pico, su suma de
+    // cuadrados y su número de muestras, juntos; la interfaz los recoge todos en cada refresco.
+    // (Antes se acumulaba en atómicos sueltos y, si la interfaz recogía a mitad de una suma, un
+    // bloque podía contarse dos veces y el RMS daba un salto.)
     struct Meter
     {
-        std::atomic<float> peak { 0 }, sumSq { 0 };
-        std::atomic<int> count { 0 };
-        void add (const float* x, int n);
+        struct Block { float peak = 0, sumSq = 0; int count = 0; };
+        void add (const float* x, int n);                 // hilo de audio
+        Block collect();                                  // hilo de la interfaz: todo lo pendiente
+        juce::AbstractFifo fifo { 512 };
+        std::array<Block, 512> blocks;
     };
     std::array<Meter, 2> inMeter, outMeter;
     std::atomic<int> meterChannels { 2 };

@@ -121,11 +121,12 @@ await page.evaluate(() => {
 });
 await page.click('#btn-proc');
 await page.waitForTimeout(700);
-const mt = await page.evaluate(() => ({ inL: meters.in[0].peak, outL: meters.out[0].peak, outR: meters.out[1].peak, clip: meters.out[0].clip, inClip: meters.in[0].clip, playing: !!playStart }));
+const mt = await page.evaluate(() => ({ rmsR: meters.out[1].rms, inL: meters.in[0].peak, outL: meters.out[0].peak, outR: meters.out[1].peak, clip: meters.out[0].clip, inClip: meters.in[0].clip, playing: !!playStart }));
 console.log('     medidores', JSON.stringify(mt));
 check(mt.playing && Math.abs(mt.inL - 20 * Math.log10(0.9)) < 0.5, 'medidor de entrada L ≈ −0,9 dBFS');
 check(Math.abs(mt.outL - (20 * Math.log10(0.9) + 3)) < 0.6 && mt.clip && !mt.inClip, 'salida L ≈ +2,1 dBFS con +3 dB: saturación solo en la salida');
 check(Math.abs(mt.outR - 20 * Math.log10(0.5)) < 0.5, 'salida R ≈ −6 dBFS');
+check(Math.abs(mt.rmsR - 20 * Math.log10(0.5 / Math.SQRT2)) < 0.1, 'RMS de salida R ≈ −9,03 dBFS (' + mt.rmsR.toFixed(2) + ')');
 await page.screenshot({ path: outDir + '/web_v021.png', fullPage: false, clip: { x: 0, y: 280, width: 1300, height: 760 } });
 await page.click('#btn-proc');
 await page.click('#cMeter');

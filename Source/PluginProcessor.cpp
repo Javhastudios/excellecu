@@ -69,13 +69,30 @@ AudioProcessorValueTreeState::ParameterLayout createLayout()
 
 void ExcellecuProcessor::Meter::add (const float* x, int n)
 {
-    float pk = 0, ss = 0;
-    for (int i = 0; i < n; ++i) { const float a = std::abs (x[i]); pk = jmax (pk, a); ss += x[i] * x[i]; }
-    // Sin bloqueos: si la interfaz recoge justo entre la lectura y la escritura se pierde un
-    // bloque de medida, nada más.
-    if (pk > peak.load (std::memory_order_relaxed)) peak.store (pk, std::memory_order_relaxed);
-    sumSq.store (sumSq.load (std::memory_order_relaxed) + ss, std::memory_order_relaxed);
-    count.fetch_add (n, std::memory_order_relaxed);
+    Block b;
+    b.count = n;
+    for (int i = 0; i < n; ++i) { b.peak = jmax (b.peak, std::abs (x[i])); b.sumSq += x[i] * x[i]; }
+    const auto w = fifo.write (1);                   // si la interfaz no recoge (ventana cerrada), se descarta
+    if (w.blockSize1 > 0) blocks[(size_t) w.startIndex1] = b;
+    else if (w.blockSize2 > 0) blocks[(size_t) w.startIndex2] = b;
+}
+
+ExcellecuProcessor::Meter::Block ExcellecuProcessor::Meter::collect()
+{
+    Block total;
+    const auto r = fifo.read (fifo.getNumReady());
+    auto take = [&] (int start, int size) {
+        for (int i = start; i < start + size; ++i)
+        {
+            const auto& b = blocks[(size_t) i];
+            total.peak = jmax (total.peak, b.peak);
+            total.sumSq += b.sumSq;
+            total.count += b.count;
+        }
+    };
+    take (r.startIndex1, r.blockSize1);
+    take (r.startIndex2, r.blockSize2);
+    return total;
 }
 
 ExcellecuProcessor::ExcellecuProcessor()

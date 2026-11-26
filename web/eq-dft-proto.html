@@ -2136,7 +2136,9 @@ function meterTick(now) {
   meters.last = now;
   let win = null;
   if (playStart && audioCtx && rawBuffer) {
-    const idx = Math.round((audioCtx.currentTime - playStart.t0) * playStart.sr);
+    // Lo que suena ahora salió del buffer hace outputLatency: el medidor va con el oído, no por delante
+    const lat = audioCtx.outputLatency || audioCtx.baseLatency || 0;
+    const idx = Math.round((audioCtx.currentTime - playStart.t0 - lat) * playStart.sr);
     const raw = [];
     for (let c = 0; c < rawBuffer.numberOfChannels; c++) raw.push(rawBuffer.getChannelData(c));
     meters.ch = Math.min(2, raw.length);

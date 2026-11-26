@@ -9,6 +9,7 @@
 #include "state/Presets.h"
 
 #include <iostream>
+#include <thread>
 
 using namespace juce;
 
@@ -324,18 +325,46 @@ int main (int argc, char** argv)
         ExcellecuProcessor p;
         p.prepareToPlay (SR, 480);
         setPlain (p, "out_r", -6.0f);
+        MeterView mv (p);   // al abrirse descarta lo que hubiera pendiente
         run (p, 48000, sine (1000, 0.5));
-        const float inPk = p.inMeter[0].peak.load(), outL = p.outMeter[0].peak.load(), outR = p.outMeter[1].peak.load();
-        check (std::abs (inPk - 0.5f) < 0.001f, "pico de entrada 0,5 (" + String (inPk, 4) + ")");
-        check (std::abs (outL - 0.5f) < 0.002f && std::abs (outR - 0.25f) < 0.002f, "pico de salida L 0,5 y R 0,25 (−6 dB)");
-        MeterView mv (p);
         mv.tick();
         const auto& ch = mv.channel (1, 1);
         check (std::abs (ch.peakDb + 12.04f) < 0.1f, "medidor de salida R: pico " + String (ch.peakDb, 2) + " dBFS");
         // RMS de todo lo recogido: incluye las 4352 muestras de silencio de la latencia
         const float wantRms = (float) (20 * std::log10 (0.25 / std::sqrt (2.0)) + 10 * std::log10 ((48000.0 - 4352) / 48000.0));
         check (std::abs (ch.rmsDb - wantRms) < 0.05f, "medidor de salida R: RMS " + String (ch.rmsDb, 2) + " dBFS (esperado " + String (wantRms, 2) + ")");
-        check (p.inMeter[0].count.load() == 0, "el medidor recoge y pone a cero");
+        check (std::abs (mv.channel (0, 0).peakDb + 6.02f) < 0.1f && std::abs (mv.channel (1, 0).peakDb + 6.02f) < 0.1f,
+               "pico de entrada y salida L 0,5 (−6 dBFS)");
+        check (p.inMeter[0].fifo.getNumReady() == 0, "el medidor recoge todo lo pendiente");
+
+        // RMS con la interfaz recogiendo a la vez que el audio (antes podía contar un bloque dos veces)
+        {
+            ExcellecuProcessor q;
+            q.prepareToPlay (SR, 64);
+            q.setNonRealtime (true);
+            MeterView mq (q);
+            std::atomic<bool> stop { false };
+            std::thread audio ([&] {
+                AudioBuffer<float> b (2, 64);
+                MidiBuffer mid;
+                for (int blk = 0; ! stop; ++blk)
+                {
+                    for (int i = 0; i < 64; ++i) for (int c = 0; c < 2; ++c) b.setSample (c, i, sine (1000) (blk * 64 + i, c));
+                    q.processBlock (b, mid);
+                }
+            });
+            Thread::sleep (300);   // pasa la latencia: ya sale seno
+            float worst = 0;
+            for (int t = 0; t < 300; ++t)
+            {
+                mq.tick();
+                if (t > 20) worst = std::max (worst, std::abs (mq.channel (0, 0).rmsDb - (float) (20 * std::log10 (sineRms))));
+                Thread::sleep (1);
+            }
+            stop = true;
+            audio.join();
+            check (worst < 0.05f, "RMS estable recogiendo a la vez que el audio (desvío máx. " + String (worst, 3) + " dB)");
+        }
         run (p, 4800, sine (1000, 1.2));
         mv.tick();
         check (mv.channel (0, 0).clip && mv.channel (1, 0).clip, "saturación encendida con picos por encima de 0 dBFS");

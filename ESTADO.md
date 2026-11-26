@@ -50,6 +50,12 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
   Presets en el **mismo formato `.excellecu` que el plugin** (se intercambian en los dos sentidos);
   los propios se guardan en el navegador (localStorage) y se exportan/importan como archivo.
   Importar un archivo que se llama como uno de fábrica le añade " (importado)" (también en el plugin).
+- Medidores del plugin, corrección (26/11): antes se acumulaba en atómicos sueltos y, si la interfaz
+  recogía a mitad de una suma, un bloque se contaba dos veces (RMS con saltos de hasta +3 dB) y la
+  energía y el número de muestras podían quedar descuadrados. Ahora cada bloque deja pico, suma
+  y muestras juntos en una cola sin bloqueos (`AbstractFifo`). Prueba nueva con el audio en otro
+  hilo. Web: los medidores descuentan la latencia de salida del navegador. RMS sin ponderar ni
+  ajuste AES-17 (un seno marca 3 dB por debajo de su pico).
 - Prueba nueva `tests/web_ui.mjs` (Chrome con Playwright, en GitHub Actions tras la prueba de humo):
   arrastre real = un paso, Ctrl+Z/Y, salida enlazada y M/S, TDM, la TDM escrita por el plugin abre
   igual en la web, guardar/importar, medidores reproduciendo. Captura `web_v021.png`.
