@@ -33,6 +33,12 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
   - **Escribir valores:** doble clic en la cifra de frecuencia, ganancia, Q, pendiente o ganancia
     de salida, se escribe y Intro (o salir del campo) aplica; Esc cancela. Acepta «1,55k»,
     «1500 Hz», «-2,5 dB». Con «Enlazar», la otra ganancia de salida se mueve lo mismo.
+  - **Resonancia de los shelves Classic (web v0.28):** «Las dos» (analógico tal cual, por
+    defecto), «Base» o «Cénit». Con Q > 0,707 se compara el shelf con el mismo a Q = 1/√2: la
+    diferencia son las dos resonancias, que cambian de lado justo en fc (allí los dos valen la
+    mitad de la ganancia, así que la curva es continua; solo hay un quiebro de pendiente). Con
+    Q ≤ 0,707 los tres modos coinciden. Selector en el panel (solo shelves Classic) y en el clic
+    derecho; preset `b{n}_res` (0 las dos, 1 base, 2 cénit). Para qué sirve: en el documento.
   - Al pasarlo al plugin: parámetro de forma por banda (y en `Params`/`bandGainAt` del motor C++,
     igual que la web para la comparación), selector y menú, y etiquetas editables con doble clic.
 

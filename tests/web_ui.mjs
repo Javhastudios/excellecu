@@ -97,6 +97,25 @@ check(sh.active && Math.abs(sh.clsPeak - 6) < 1e-9, 'forma Classic: +6 dB en la 
 check(Math.abs(sh.clsUp + sh.clsDown) < 1e-9, 'Classic simétrica: a 1,5 kHz +' + sh.clsUp.toFixed(2) + ' / ' + sh.clsDown.toFixed(2) + ' dB');
 check(sh.tdmUp > -sh.tdmDown + 0.2, 'TDM asimétrica (subir más ancho que bajar): +' + sh.tdmUp.toFixed(2) + ' / ' + sh.tdmDown.toFixed(2) + ' dB');
 check(sh.shapeBack === 'classic', 'la forma se guarda en el preset');
+// Resonancia de los shelves Classic: las dos / base / cénit
+const rs = await page.evaluate(() => {
+  const b = makeBand('hs', { fc: 1000, gain: 6, q: 2 }); b.shape = 'classic'; bands.push(b); selectedId = b.id; syncPanel();
+  const curve = res => { b.res = res; const lo = [], hi = []; for (let f = 100; f <= 10000; f *= 1.02) { const d = 20 * Math.log10(bandGainAt('hs', b.sets.st, f, 'classic', b.res)); (f < 1000 ? lo : hi).push(d); } return { min: Math.min(...lo), max: Math.max(...hi) }; };
+  const both = curve('both'), base = curve('base'), top = curve('top');
+  document.getElementById('bpr-top').click();
+  const shown = document.getElementById('bp-res-row').style.display !== 'none' && document.getElementById('bpr-top').classList.contains('ms-active');
+  b.sets.st.q = 0.6;
+  const flat = ['both', 'base', 'top'].map(r => { b.res = r; return 20 * Math.log10(bandGainAt('hs', b.sets.st, 700, 'classic', r)); });
+  const res = presetXml('x', { bands: [b], out: outGain }).includes('b1_res" v="2"');
+  deleteBand(b.id); commitHistory();
+  return { both, base, top, shown, flat, res };
+});
+console.log('     resonancia', JSON.stringify(rs));
+check(rs.both.min < -0.3 && rs.both.max > 6.3, 'shelf Classic, Q 2, «Las dos»: valle en la base y joroba en el cénit');
+check(rs.base.min < -0.3 && rs.base.max <= 6.0001, '«Base»: solo el valle de la base');
+check(rs.top.min >= -0.0001 && rs.top.max > 6.3, '«Cénit»: solo la joroba del cénit');
+check(rs.shown && Math.abs(rs.flat[0] - rs.flat[1]) < 1e-12 && Math.abs(rs.flat[0] - rs.flat[2]) < 1e-12 && rs.res, 'selector visible; con Q ≤ 0,71 los tres modos coinciden; se guarda en el preset');
+
 // Escribir valores: doble clic en la cifra, escribir, Intro
 const typeInto = async (id, text) => {
   await page.dblclick('#' + id);
