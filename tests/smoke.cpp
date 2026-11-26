@@ -333,6 +333,8 @@ int main (int argc, char** argv)
         // RMS de todo lo recogido: incluye las 4352 muestras de silencio de la latencia
         const float wantRms = (float) (20 * std::log10 (0.25 / std::sqrt (2.0)) + 10 * std::log10 ((48000.0 - 4352) / 48000.0));
         check (std::abs (ch.rmsDb - wantRms) < 0.05f, "medidor de salida R: RMS " + String (ch.rmsDb, 2) + " dBFS (esperado " + String (wantRms, 2) + ")");
+        // La cifra es la del canal más alto: L (0 dB), 6,02 dB por encima de R
+        check (std::abs (mv.rmsReadout (1) - (wantRms + 6.0206f + 3.0103f)) < 0.05f, "cifra de RMS de la salida (AES-17, canal más alto): " + String (mv.rmsReadout (1), 2));
         mv.setAes17 (true);
         check (std::abs (mv.shownRms (ch) - (wantRms + 3.0103f)) < 0.05f, "RMS AES-17 por defecto: +3,01 dB (" + String (mv.shownRms (ch), 2) + ")");
         mv.setAes17 (false);

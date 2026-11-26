@@ -18,6 +18,9 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
   el ratón (el sonido sí era correcto). `OutputPanel::refresh` dejaba quietos los dos mientras se
   arrastraba; ahora solo deja quieto el arrastrado (`dragRow`). Prueba de humo con un arrastre
   simulado (falla con el código anterior). En la web ya iba bien.
+- **Cifra de RMS en los medidores** (plugin y web v0.26), bajo la del pico máximo: modo elegido
+  (AES-17 o sin ponderar), canal más alto, refrescada 4 veces por segundo para poder leerla.
+  Pruebas de humo y de Chrome.
 
 ## v0.25 (26/11/2026): bypass alineado, menos CPU, letra legible y analizador en la web
 

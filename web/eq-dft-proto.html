@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EQ Motor DFT — Prototipo v0.25</title>
+<title>EQ Motor DFT — Prototipo v0.26</title>
 <style>
   :root {
     --bg: #0e0e10;
@@ -279,7 +279,7 @@
 </head>
 <body>
 
-<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.25</h1>
+<h1>EQ — Motor <span>DFT/IDFT</span> — Prototipo v0.26</h1>
 
 <div class="modules">
 
@@ -2324,7 +2324,7 @@ function initAnalyzer() {
 // RMS de ~300 ms, pico retenido 1,5 s, saturación (≥ 0 dBFS) que queda encendida hasta clic.
 const METER_MIN = -60, METER_MAX = 6;
 const newMeterCh = () => ({ peak: -100, rms: -100, hold: -100, holdT: 0, max: -100, clip: false });
-const meters = { in: [newMeterCh(), newMeterCh()], out: [newMeterCh(), newMeterCh()], ch: 2, last: 0 };
+const meters = { in: [newMeterCh(), newMeterCh()], out: [newMeterCh(), newMeterCh()], ch: 2, last: 0, rmsShown: [-120, -120], lastReadout: 0 };
 const linDb = g => g > 1e-6 ? 20 * Math.log10(g) : -120;
 
 function meterWindow(chs, idx, sr, M) {
@@ -2366,6 +2366,14 @@ function meterTick(now) {
     m.max = Math.max(m.max, db);
     if (pk >= 1) m.clip = true;
   }
+  if (now - meters.lastReadout >= 250) {
+    meters.lastReadout = now;
+    ['in', 'out'].forEach((g, gi) => {
+      let r = -120;
+      for (let c = 0; c < meters.ch; c++) r = Math.max(r, meters[g][c].rms + (rmsAes ? AES17_OFFSET : 0));
+      meters.rmsShown[gi] = r;
+    });
+  }
   drawMeters();
   requestAnimationFrame(meterTick);
 }
@@ -2381,7 +2389,7 @@ function drawMeters() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const W = r.width, H = r.height;
   ctx.clearRect(0, 0, W, H);
-  const titleH = 14, ledH = 6, numH = 26, scaleW = 20, groupW = (W - scaleW) / 2;
+  const titleH = 14, ledH = 6, numH = 42, scaleW = 20, groupW = (W - scaleW) / 2;   // abajo: L/R, pico máximo y RMS
   const top = titleH + 4 + ledH + 3, bottom = H - numH;
   const yFor = db => bottom - Math.min(1, Math.max(0, (db - METER_MIN) / (METER_MAX - METER_MIN))) * (bottom - top);
   const css = getComputedStyle(document.documentElement);
@@ -2418,6 +2426,10 @@ function drawMeters() {
     }
     ctx.font = '11px ' + col('--font'); ctx.fillStyle = clip ? red : col('--text');
     ctx.fillText(max <= -99 ? '−∞' : (max > 0 ? '+' : '') + max.toFixed(1), gx + groupW / 2, bottom + 18);
+    // RMS (modo elegido), canal más alto, refrescado 4 veces por segundo para poder leerlo
+    const rms = meters.rmsShown[gi];
+    ctx.font = '10px ' + col('--font'); ctx.fillStyle = col('--muted');
+    ctx.fillText('RMS ' + (rms <= -99 ? '−∞' : (rms > 0 ? '+' : '') + rms.toFixed(1)), gx + groupW / 2, bottom + 33);
   });
 }
 
@@ -2587,7 +2599,7 @@ function presetXml(name, st) {
   const o = st.out;
   body += P('out_mode', o.mode === 'ms' ? 1 : 0) + P('out_link', o.link === false ? 0 : 1)
         + P('out_l', o.l) + P('out_r', o.r) + P('out_m', o.m) + P('out_s', o.s);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.25" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<ExcellecuPreset version="${PRESET_VERSION}" plugin="Excellecu web v0.26" name="${esc(name)}" lrFresh="${fresh}">\n${body}</ExcellecuPreset>\n`;
 }
 
 // XML → estado. Lo que falta toma el valor por defecto del plugin; lo desconocido se ignora.

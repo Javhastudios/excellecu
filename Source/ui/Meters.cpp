@@ -68,6 +68,16 @@ void MeterView::tick()
             ch.maxDb = jmax (ch.maxDb, db);
             if (pk >= 1.0f) ch.clip = true;
         }
+    if (now - lastReadout >= 250.0 || lastReadout == 0)
+    {
+        lastReadout = now;
+        for (int g = 0; g < 2; ++g)
+        {
+            float r = -120.0f;
+            for (int c = 0; c < channels; ++c) r = jmax (r, shownRms (groups[(size_t) g][(size_t) c]));
+            rmsShown[(size_t) g] = r;
+        }
+    }
     repaint();
 }
 
@@ -87,7 +97,7 @@ float MeterView::yFor (float db, Rectangle<float> bar) const
 void MeterView::paint (Graphics& g)
 {
     auto area = getLocalBounds().toFloat().withTrimmedBottom (42);   // abajo, el selector de RMS
-    const float titleH = 16, ledH = 6, numH = 26;
+    const float titleH = 16, ledH = 6, numH = 40;   // abajo: L/R, pico máximo y RMS
     const float scaleW = 20;
     const float groupW = (area.getWidth() - scaleW) / 2;
     const char* titles[] = { "ENT", "SAL" };
@@ -163,5 +173,11 @@ void MeterView::paint (Graphics& g)
         g.setColour (anyClip ? Colour (0xffff4d4d) : theme::text.withAlpha (0.85f));
         g.setFont (theme::font (9.0f));
         g.drawText (dbText (maxDb), Rectangle<float> (gx, bottom + 12, groupW, 12), Justification::centred, false);
+        // RMS (en el modo elegido: AES-17 o sin ponderar), con su etiqueta para no confundirla con el pico
+        const float rms = rmsShown[(size_t) gi];
+        g.setColour (theme::muted);
+        g.setFont (theme::font (8.0f));
+        g.drawText (String ("RMS ") + dbText (rms),
+                    Rectangle<float> (gx - 2, bottom + 25, groupW + 4, 12), Justification::centred, false);
     }
 }

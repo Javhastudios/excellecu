@@ -161,6 +161,8 @@ console.log('     medidores', JSON.stringify(mt));
 check(mt.playing && Math.abs(mt.inL - 20 * Math.log10(0.9)) < 0.5, 'medidor de entrada L ≈ −0,9 dBFS');
 check(Math.abs(mt.outL - (20 * Math.log10(0.9) + 3)) < 0.6 && mt.clip && !mt.inClip, 'salida L ≈ +2,1 dBFS con +3 dB: saturación solo en la salida');
 check(Math.abs(mt.outR - 20 * Math.log10(0.5)) < 0.5, 'salida R ≈ −6 dBFS');
+const rr = await page.evaluate(() => meters.rmsShown[1]);
+check(Math.abs(rr - (20 * Math.log10(0.9 * 10 ** (3 / 20) / Math.SQRT2) + 3.0103)) < 0.3, 'cifra de RMS de la salida (AES-17, canal más alto): ' + rr.toFixed(2));
 check(Math.abs(mt.rmsR - 20 * Math.log10(0.5 / Math.SQRT2)) < 0.1, 'RMS de salida R ≈ −9,03 dBFS (' + mt.rmsR.toFixed(2) + ')');
 await page.evaluate(() => { selectedId = bands[3].id; syncPanel(); updateCharts(); });
 await page.waitForTimeout(50);

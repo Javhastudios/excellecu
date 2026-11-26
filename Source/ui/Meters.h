@@ -35,6 +35,8 @@ public:
     bool aes17() const;
     void setAes17 (bool on);
     float shownRms (const Channel& c) const { return c.rmsDb + (aes17() ? AES17_OFFSET : 0.0f); }
+    // Cifra de RMS bajo cada grupo (canal más alto), refrescada 4 veces por segundo para poder leerla
+    float rmsReadout (int group) const { return rmsShown[(size_t) group]; }
 
 private:
     void timerCallback() override { tick(); }
@@ -44,5 +46,6 @@ private:
     MsButton aesButton { "AES-17" }, flatButton { "Sin ponderar" };
     std::array<std::array<Channel, 2>, 2> groups;   // [entrada/salida][canal]
     int channels = 2;
-    double lastTick = 0;
+    double lastTick = 0, lastReadout = 0;
+    std::array<float, 2> rmsShown { -120.0f, -120.0f };
 };
