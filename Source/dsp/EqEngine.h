@@ -21,10 +21,17 @@
 #include <memory>
 
 // En macOS el plugin usa la FFT de Accelerate (vDSP), mucho más rápida; las pruebas comparan las
-// dos versiones muestra a muestra (paso de macOS en GitHub Actions).
+// dos versiones muestra a muestra (paso de macOS en GitHub Actions). La cabecera de Accelerate
+// no se incluye aquí (trae tipos del sistema, como Component, que chocan con JUCE): las llamadas
+// están en FftAccelerate.cpp, que solo se compila en macOS.
 #if defined(__APPLE__) && defined(EX_USE_ACCELERATE)
- #include <Accelerate/Accelerate.h>
  #define EX_FFT_ACCELERATE 1
+namespace eq::accel
+{
+void* create (int log2n);
+void destroy (void* setup);
+void forward (void* setup, double* re, double* im, int log2n);   // directa, sin escalar
+}
 #else
  #define EX_FFT_ACCELERATE 0
 #endif
@@ -256,7 +263,7 @@ public:
         while ((1 << bits) < n) ++bits;
         log2n = bits;
 #if EX_FFT_ACCELERATE
-        setup.reset (vDSP_create_fftsetupD ((vDSP_Length) bits, kFFTRadix2));
+        setup.reset (accel::create (bits));
         return;
 #endif
         for (int i = 0; i < n; ++i)
@@ -285,8 +292,7 @@ public:
     void forward (double* re, double* im) const
     {
 #if EX_FFT_ACCELERATE
-        DSPDoubleSplitComplex sc { re, im };   // vDSP: transformada directa sin escalar, como la portable
-        vDSP_fft_zipD (setup.get(), &sc, 1, (vDSP_Length) log2n, kFFTDirection_Forward);
+        accel::forward (setup.get(), re, im, log2n);
         return;
 #endif
         for (size_t t = 0; t < swapA.size(); ++t)
@@ -337,8 +343,8 @@ private:
     std::vector<int> swapA, swapB, stageLen, stageOffset;
     std::vector<double> w1r, w1i, w2r, w2i, w3r, w3i;
 #if EX_FFT_ACCELERATE
-    struct SetupDeleter { void operator() (OpaqueFFTSetupD* p) const { if (p != nullptr) vDSP_destroy_fftsetupD (p); } };
-    std::unique_ptr<OpaqueFFTSetupD, SetupDeleter> setup;
+    struct SetupDeleter { void operator() (void* p) const { if (p != nullptr) accel::destroy (p); } };
+    std::unique_ptr<void, SetupDeleter> setup;
 #endif
 };
 

@@ -211,8 +211,8 @@ void ExcellecuProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
     const int chunk = dryScratch[0].empty() ? ns : (int) dryScratch[0].size();   // sin preparar: de una vez
     for (int start = 0; start < ns; start += chunk)
     {
-        float* ptrs[2] = { buffer.getWritePointer (0, start), nc > 1 ? buffer.getWritePointer (1, start) : nullptr };
-        processChunk (ptrs, nc, jmin (chunk, ns - start), false);
+        float* chunkPtrs[2] = { buffer.getWritePointer (0, start), nc > 1 ? buffer.getWritePointer (1, start) : nullptr };
+        processChunk (chunkPtrs, nc, jmin (chunk, ns - start), false);
     }
 }
 
@@ -225,8 +225,8 @@ void ExcellecuProcessor::processBlockBypassed (AudioBuffer<float>& buffer, MidiB
     const int chunk = dryScratch[0].empty() ? ns : (int) dryScratch[0].size();
     for (int start = 0; start < ns; start += chunk)
     {
-        float* ptrs[2] = { buffer.getWritePointer (0, start), nc > 1 ? buffer.getWritePointer (1, start) : nullptr };
-        processChunk (ptrs, nc, jmin (chunk, ns - start), true);
+        float* chunkPtrs[2] = { buffer.getWritePointer (0, start), nc > 1 ? buffer.getWritePointer (1, start) : nullptr };
+        processChunk (chunkPtrs, nc, jmin (chunk, ns - start), true);
     }
 }
 

@@ -71,6 +71,7 @@ target_compile_definitions(Excellecu PUBLIC
 
 # macOS: FFT de Accelerate en el motor (ver EqEngine.h)
 if(APPLE)
+    target_sources(Excellecu PRIVATE Source/dsp/FftAccelerate.cpp)
     target_compile_definitions(Excellecu PRIVATE EX_USE_ACCELERATE=1)
     target_link_libraries(Excellecu PRIVATE "-framework Accelerate")
 endif()
