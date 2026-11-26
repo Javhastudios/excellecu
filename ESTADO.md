@@ -12,7 +12,7 @@ Original: `web/eq-dft-proto.html` (ahora v0.21). Objetivo: medirlo en Plugin Doc
 iterando. **Acuerdo (26/11/2026): cada avance del plugin se hace también en el HTML**, que Javier
 guarda como archivo; el HTML conserva además los motores Clásico, la ventana y el overlap.
 
-## En la rama `trabajo` (sin compilar en GitHub Actions todavía)
+## v0.25 (26/11/2026): bypass alineado, menos CPU, letra legible y analizador en la web
 
 - **Bypass sin desalinear:** parámetro propio `bypass` que el plugin ofrece al DAW
   (`getBypassParameter`), así el DAW llama a `processBlock` y el plugin decide. Puenteado, la
@@ -58,6 +58,8 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
   con la web sigue exacta. Medidor propio: `tests/bench_engine.cpp`. Accelerate no se puede
   ejecutar aquí: GitHub Actions lo compara con la FFT portable en el Mac (`tests/fft_check.cpp` y
   `engine_ref`) y mide las dos. Pendiente de medir en Plugin Doctor.
+- Versión: plugin 0.25.0, igual que la web (la web v0.24 fue el analizador; el plugin salta de
+  0.23 a 0.25). El analizador sigue solo en la web.
 
 ## v0.23 (26/11/2026): puntos hasta 30 kHz y escuchar banda
 
