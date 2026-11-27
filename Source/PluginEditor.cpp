@@ -598,6 +598,28 @@ ExcellecuEditor::ExcellecuEditor (ExcellecuProcessor& p)
         addAndMakeVisible (b);
     }
 
+    // Analizador: Pre y Post se encienden y apagan; velocidad e inclinación cambian con cada clic
+    {
+        const char* names[] = { "Pre", "Post", "Media", "0 dB/oct" };
+        const char* tips[] = { "Espectro de la entrada (antes del EQ), en gris",
+                               "Espectro de lo que suena (después del EQ y la salida)",
+                               "Caída del analizador (clic para cambiar)",
+                               "Inclinación del analizador alrededor de 1 kHz (clic para cambiar). En 0, el ruido rosa sale plano" };
+        for (int i = 0; i < 4; ++i)
+        {
+            auto* b = anaButtons.add (new MsButton (String::fromUTF8 (names[i])));
+            b->setTooltip (String::fromUTF8 (tips[i]));
+            b->onClick = [this, i] {
+                auto& a = mag.analyzer;
+                mag.setAnalyzer (i == 0 ? ! a.showPre : a.showPre, i == 1 ? ! a.showPost : a.showPost,
+                                 i == 2 ? (a.speed + 1) % 3 : a.speed, i == 3 ? (a.tilt + 1) % 4 : a.tilt);
+                syncAnaButtons();
+            };
+            addAndMakeVisible (b);
+        }
+        syncAnaButtons();
+    }
+
     setWantsKeyboardFocus (true);
     setResizable (true, true);
     setResizeLimits (960, 760, 2400, 1800);
@@ -605,6 +627,15 @@ ExcellecuEditor::ExcellecuEditor (ExcellecuProcessor& p)
     constructed = true;
     refreshNow();
     startTimerHz (30);
+}
+
+void ExcellecuEditor::syncAnaButtons()
+{
+    const auto& a = mag.analyzer;
+    anaButtons[0]->setActive (a.showPre);
+    anaButtons[1]->setActive (a.showPost);
+    anaButtons[2]->setButtonText (String::fromUTF8 (ui::Analyzer::SPEED_NAMES[a.speed]));
+    anaButtons[3]->setButtonText (String (ui::Analyzer::TILTS[a.tilt], 1).replace (".0", "").replace (".", ",") + " dB/oct");
 }
 
 ExcellecuEditor::~ExcellecuEditor()
@@ -632,7 +663,7 @@ void ExcellecuEditor::refreshNow()
     presetBar.refresh();
 
     // Los chips pueden ocupar más o menos filas: si cambia su alto, se recoloca la gráfica
-    const int ch = chips.layoutHeight (jmax (100, magPanel.getWidth() - 20));
+    const int ch = chips.layoutHeight (chipsW);
     if (ch != shownChipsH) { shownChipsH = ch; layoutMagHeader(); }
     chips.repaint();
 
@@ -738,6 +769,7 @@ void ExcellecuEditor::paint (Graphics& g)
     g.setColour (theme::muted);
     g.setFont (theme::font (9.0f));
     g.drawText ("ESCALA", zoomLabel, Justification::centredRight, false);
+    g.drawText ("ANALIZADOR", anaLabel, Justification::centredRight, false);
     g.drawText ("NUEVO PUNTO", Rectangle<int> (newTypeButtons[0]->getX() - 80, magTitle.getY(), 76, 16), Justification::centredRight, false);
 
     g.setColour (theme::muted.withAlpha (0.7f));
@@ -770,9 +802,27 @@ void ExcellecuEditor::layoutMagHeader()
         zx += bw + 3;
     }
     mi.removeFromTop (10);
-    const int ch = chips.layoutHeight (mi.getWidth());
+    // Analizador: en la fila del título si cabe entre la escala y «Nuevo punto» (como la web); si
+    // no, a la derecha de la fila de los chips
+    const int labelW = 74, gap = 3;
+    int anaW = labelW + 4;
+    for (auto* b : anaButtons) anaW += jmax (b->getButtonText().length() * 7 + 12, b == anaButtons[2] ? 60 : b == anaButtons[3] ? 74 : 0) + gap;
+    const int newTypeLeft = newTypeButtons[0]->getX() - 84;
+    const bool inTitle = zx + 24 + anaW <= newTypeLeft - 16;
+    int ax = inTitle ? zx + 24 : mi.getRight() - anaW;
+    const int ay = inTitle ? titleRow.getY() : mi.getY();
+    anaLabel = { ax, ay, labelW, 16 };
+    ax += labelW + 4;
+    for (auto* b : anaButtons)
+    {
+        const int bw = jmax (b->getButtonText().length() * 7 + 12, b == anaButtons[2] ? 60 : b == anaButtons[3] ? 74 : 0);
+        b->setBounds (ax, ay, bw, 15);
+        ax += bw + gap;
+    }
+    chipsW = inTitle ? mi.getWidth() : jmax (100, mi.getWidth() - anaW - 16);
+    const int ch = chips.layoutHeight (chipsW);
     shownChipsH = ch;
-    chips.setBounds (mi.removeFromTop (ch));
+    chips.setBounds (mi.removeFromTop (ch).withWidth (chipsW));
     mi.removeFromTop (8);
     helpArea = mi.removeFromBottom (26).withTrimmedTop (6);
     mag.setBounds (mi);

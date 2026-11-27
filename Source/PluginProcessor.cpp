@@ -117,6 +117,7 @@ ExcellecuProcessor::ExcellecuProcessor()
       history (*this, { [this] { return lrFreshMask(); }, [this] (int m) { setLrFreshMask (m); } })
 {
     history.setSelectionAccess ([this] { return selected; }, [this] (int s) { selected = s; });
+    for (int i = 0; i < ANA_RING; ++i) { anaPre[(size_t) i].store (0.0f); anaPost[(size_t) i].store (0.0f); }
     const char* outIds[] = { "out_l", "out_r", "out_m", "out_s" };
     for (int i = 0; i < 4; ++i) outPtr[i] = apvts.getRawParameterValue (outIds[i]);
     bypassParam = dynamic_cast<AudioParameterBool*> (apvts.getParameter ("bypass"));
@@ -297,6 +298,19 @@ void ExcellecuProcessor::processChunk (float* const* ch, int nc, int ns, bool fo
         for (int c = 0; c < nc; ++c) std::copy (dryScratch[(size_t) c].data(), dryScratch[(size_t) c].data() + ns, ch[c]);
     }
     for (int c = 0; c < nc; ++c) outMeter[(size_t) c].add (ch[c], ns);
+
+    // Analizador: Pre = la entrada retrasada (la copia del bypass), Post = lo que sale
+    int pos = anaPos.load (std::memory_order_relaxed);
+    for (int i = 0; i < ns; ++i)
+    {
+        float pre = 0.0f;
+        if (haveDry) pre = nc > 1 ? 0.5f * (dryScratch[0][(size_t) i] + dryScratch[1][(size_t) i]) : dryScratch[0][(size_t) i];
+        const float post = nc > 1 ? 0.5f * (ch[0][i] + ch[1][i]) : ch[0][i];
+        anaPre[(size_t) pos].store (pre, std::memory_order_relaxed);
+        anaPost[(size_t) pos].store (post, std::memory_order_relaxed);
+        pos = (pos + 1) & (ANA_RING - 1);
+    }
+    anaPos.store (pos, std::memory_order_release);
 }
 
 void ExcellecuProcessor::applyOutputGain (float* const* ch, int numCh, int numSamples)

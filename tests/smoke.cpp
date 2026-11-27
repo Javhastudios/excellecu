@@ -823,6 +823,54 @@ int main (int argc, char** argv)
     }
 
     {
+        std::cout << "Analizador (v0.31)" << std::endl;
+        ExcellecuProcessor p;
+        p.prepareToPlay (SR, 480);
+        ui::BandModel m (p);
+        const int W = 1000;
+        auto fAt = [] (int x) { return 20.0 * std::pow (1000.0, x / (double) W); };   // 20 Hz … 20 kHz
+        auto pixelOf = [] (double f) { return (int) std::round (W * std::log (f / 20.0) / std::log (1000.0)); };
+        // Seno de 1 kHz a −12 dBFS (amplitud 0,25), EQ plana: Pre y Post marcan −12 dB
+        run (p, 48000, sine (1000));
+        // La subida recorre el 60 % de lo que falta en cada fotograma (como la web): se deja asentar
+        auto settle = [&] (ui::Analyzer& an) { for (int k = 0; k < 40; ++k) an.tick (p, 0, W, fAt); };
+        ui::Analyzer a;
+        settle (a);
+        const float preK = a.preDb[(size_t) pixelOf (1000)], postK = a.postDb[(size_t) pixelOf (1000)];
+        check (std::abs (preK + 12.04f) < 0.3f && std::abs (postK + 12.04f) < 0.3f,
+               "seno de 1 kHz a −12 dBFS: Pre " + String (preK, 2) + " dB, Post " + String (postK, 2) + " dB");
+        const float far = a.postDb[(size_t) pixelOf (5000)];
+        check (far < -80, "lejos del seno no hay nada (" + String (far, 1) + " dB a 5 kHz)");
+        // Pre va retrasada lo mismo que el motor: con la EQ plana, Pre y Post son la misma señal
+        {
+            std::vector<float> pre ((size_t) ui::Analyzer::N), post ((size_t) ui::Analyzer::N);
+            run (p, 48000, [] (int i, int c) { return (float) (0.3 * std::sin (i * 0.0123 + c) * std::sin (i * 0.00071)); });
+            p.copyAnalyzer (pre.data(), post.data(), ui::Analyzer::N);
+            float maxd = 0, maxv = 0;
+            for (int i = 0; i < ui::Analyzer::N; ++i) { maxd = std::max (maxd, std::abs (pre[(size_t) i] - post[(size_t) i])); maxv = std::max (maxv, std::abs (pre[(size_t) i])); }
+            check (maxv > 0.1f && maxd < 1e-4f, "Pre y Post alineados muestra a muestra con la EQ plana (diferencia máx. " + String (maxd, 7) + ")");
+        }
+        // Campana +6 dB en 1 kHz: Post − Pre = +6 dB en 1 kHz
+        m.create (eq::Bell, 1000, 6);
+        run (p, 48000, sine (1000));
+        ui::Analyzer b;
+        settle (b);
+        const float diff = b.postDb[(size_t) pixelOf (1000)] - b.preDb[(size_t) pixelOf (1000)];
+        check (std::abs (diff - 6) < 0.2f, "campana +6 dB: Post − Pre = " + String (diff, 2) + " dB en 1 kHz");
+        // Caída: sin señal nueva baja según la velocidad (Media = 30 dB/s)
+        run (p, 48000, [] (int, int) { return 0.0f; });
+        b.tick (p, 0.5, W, fAt);
+        const float fell = b.postDb[(size_t) pixelOf (1000)];
+        check (std::abs (fell - (-6.04f - 15)) < 0.5f, "con silencio cae 15 dB en medio segundo a velocidad Media (" + String (fell, 1) + " dB)");
+        // Inclinación: 3 dB/oct alrededor de 1 kHz suma 3 dB por octava por encima
+        run (p, 48000, sine (2000));
+        ui::Analyzer c; c.tilt = 2;
+        settle (c);
+        const float tilted = c.preDb[(size_t) pixelOf (2000)];
+        check (std::abs (tilted - (-12.04f + 3)) < 0.3f, "inclinación 3 dB/oct: seno de 2 kHz a −12 dBFS marca " + String (tilted, 2) + " dB");
+    }
+
+    {
         std::cout << "Interfaz" << std::endl;
         ExcellecuProcessor p;
         p.prepareToPlay (SR, 480);
@@ -1009,6 +1057,52 @@ int main (int argc, char** argv)
             check (typed && std::abs (plain (p, ids::set (ls, eq::St, "fc")) - 2500) < 1,
                    "escribir «2,5k» en la frecuencia la pone a " + fmt::freq (plain (p, ids::set (ls, eq::St, "fc"))));
             check (entry != nullptr && ! entry->isOpen(), "el campo se cierra al aplicar");
+        }
+        // Analizador en la ventana: con ruido sonando se dibuja; ajustes guardados con la sesión
+        {
+            for (int s2 = 0; s2 < eq::MAX_BANDS; ++s2) m.remove (s2);
+            p.soloOn = false;                 // una prueba anterior deja «Escuchar» encendido
+            p.setSolo (-1, eq::St);
+            m.create (eq::Bell, 2500, -6);
+            m.create (eq::HighPass, 80, 0);
+            uint32_t rng = 1;
+            run (p, 96000, [&rng] (int, int) { rng = rng * 1664525u + 1013904223u; return (float) (((rng >> 8) / 8388608.0 - 1.0) * 0.3); });
+            MagChart* chart = nullptr;
+            std::function<void (Component&)> findChart = [&] (Component& c) {
+                for (auto* ch : c.getChildren()) { if (auto* mc = dynamic_cast<MagChart*> (ch)) chart = mc; findChart (*ch); }
+            };
+            findChart (*ed);
+            MessageManager::getInstance()->runDispatchLoopUntil (2500);   // que caiga lo de pruebas anteriores
+            check (chart != nullptr && chart->analyzer.active && ! chart->analyzer.postDb.empty(), "con audio, el analizador se dibuja en la gráfica");
+            {
+                const auto G = chart->geom();
+                auto at = [&] (const std::vector<float>& v, double f) { return v[(size_t) std::round (G.toX (f) - G.l)]; };
+                const float d25 = at (chart->analyzer.postDb, 2500) - at (chart->analyzer.preDb, 2500);
+                const float d40 = at (chart->analyzer.postDb, 40) - at (chart->analyzer.preDb, 40);
+                check (std::abs (d25 + 6) < 1.5f && std::abs (d40 + 12) < 2.0f,
+                       "con ruido, Post − Pre: " + String (d25, 1) + " dB a 2,5 kHz (campana −6) y " + String (d40, 1) + " dB a 40 Hz (HPF de 12 dB/oct en 80 Hz)");
+            }
+            snapshot (*ed, outDir.getChildFile ("12_analizador.png"));
+            chart->setAnalyzer (true, false, 2, 3);
+            check (! (bool) p.apvts.state.getProperty ("anaPost") && (int) p.apvts.state.getProperty ("anaSpeed") == 2
+                   && (int) p.apvts.state.getProperty ("anaTilt") == 3, "los ajustes del analizador se guardan con la sesión");
+            // Botones del analizador sin pisar a los demás, ancho y mínimo
+            for (int w : { 1120, 960 })
+            {
+                ed->setSize (w, w == 960 ? 760 : 1000);
+                MessageManager::getInstance()->runDispatchLoopUntil (100);
+                std::vector<Rectangle<int>> rs;
+                for (auto* ch : ed->getChildren())
+                    if (auto* bt = dynamic_cast<MsButton*> (ch)) if (bt->isVisible()) rs.push_back (bt->getBounds());
+                bool overlap = false;
+                for (size_t i = 0; i < rs.size(); ++i)
+                    for (size_t j = i + 1; j < rs.size(); ++j) overlap = overlap || rs[i].intersects (rs[j]);
+                check (! overlap, "ventana de " + String (w) + " px: los botones de la cabecera no se pisan");
+                if (w == 960) snapshot (*ed, outDir.getChildFile ("13_analizador_minimo.png"));
+            }
+            chart->setAnalyzer (true, true, 1, 0);
+            ed->setSize (1120, 1000);
+            MessageManager::getInstance()->runDispatchLoopUntil (100);
         }
         ed.reset();
 

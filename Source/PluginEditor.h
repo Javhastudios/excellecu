@@ -132,12 +132,13 @@ private:
     PresetBar presetBar;
     MeterView meters;
     juce::TooltipWindow tooltips { this, 700 };
-    juce::OwnedArray<MsButton> newTypeButtons, zoomButtons;
+    juce::OwnedArray<MsButton> newTypeButtons, zoomButtons, anaButtons;   // analizador: Pre, Post, velocidad, inclinación
     ChartData chart;
     eq::Params shownParams;
     double shownRate = 0;
-    int shownWidth = 0, shownSelected = -2, shownChipsH = -1;
+    int shownWidth = 0, shownSelected = -2, shownChipsH = -1, chipsW = 100;
+    void syncAnaButtons();
     bool firstChart = true;
-    juce::Rectangle<int> moduleArea, magPanel, meterPanel, bandArea, outArea, helpArea, zoomLabel;
+    juce::Rectangle<int> moduleArea, magPanel, meterPanel, bandArea, outArea, helpArea, zoomLabel, anaLabel;
     juce::String status;
 };

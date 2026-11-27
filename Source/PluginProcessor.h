@@ -89,6 +89,24 @@ public:
     std::array<Meter, 2> inMeter, outMeter;
     std::atomic<int> meterChannels { 2 };
 
+    // Analizador (v0.31, web v0.24): suma mono de la entrada retrasada lo mismo que el motor (así
+    // Pre y Post van alineados) y de lo que sale. El audio escribe; la ventana copia las últimas
+    // muestras. Sin bloqueos: cada muestra es atómica y la posición se publica al final del bloque.
+    static constexpr int ANA_RING = 16384;
+    std::array<std::atomic<float>, ANA_RING> anaPre, anaPost;
+    std::atomic<int> anaPos { 0 };
+    // Copia las últimas n muestras (n ≤ ANA_RING), de la más antigua a la más reciente
+    void copyAnalyzer (float* pre, float* post, int n) const
+    {
+        const int end = anaPos.load (std::memory_order_acquire);
+        for (int i = 0; i < n; ++i)
+        {
+            const int k = (end - n + i) & (ANA_RING - 1);
+            pre[i] = anaPre[(size_t) k].load (std::memory_order_relaxed);
+            post[i] = anaPost[(size_t) k].load (std::memory_order_relaxed);
+        }
+    }
+
     // Presets: aplica valores normalizados (todos los parámetros) desde la interfaz, como un solo
     // paso de deshacer. El nombre se guarda con la sesión.
     void applyPreset (const std::vector<float>& values, int lrFresh, const juce::String& name);

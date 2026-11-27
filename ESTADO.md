@@ -85,6 +85,30 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
     escritos, panel con las tres filas, tamaño mínimo sin botones pisados, escribir «2,5k» con
     doble clic. Capturas 10 (shelf Classic con Cénit y codo Suave) y 11 (tamaño mínimo).
 
+## En la rama `trabajo` (sin compilar): v0.31, analizador en el plugin
+
+- **Analizador de espectro** (el de la web v0.24): Pre (entrada, en gris) y Post (lo que suena,
+  en verde) detrás de las curvas. FFT de 8192 con Hann, suma de 1/12 de octava por píxel
+  dividida entre el ancho equivalente de la Hann (un seno marca su nivel real, el ruido rosa sale
+  plano), subida rápida (60 % de lo que falta por fotograma) y caída Lenta / Media / Rápida (12,
+  30, 80 dB/s), inclinación 0 / 1,5 / 3 / 4,5 dB/oct alrededor de 1 kHz. Escala propia de 0 a
+  −90 dBFS a toda la altura. 30 fotogramas por segundo (`ui/Analyzer.h`, temporizador propio de
+  `MagChart`).
+- **Pre alineado con Post:** el audio guarda en dos memorias circulares de 16 384 muestras (sin
+  bloqueos) la suma mono de la entrada retrasada lo mismo que el motor (la copia del bypass) y la
+  de lo que sale (después de la ganancia de salida y del bypass). Con la EQ plana son idénticas
+  muestra a muestra.
+- Botones en la cabecera de la gráfica (Pre, Post, velocidad, inclinación), entre Escala y Nuevo
+  punto si caben; si no, a la derecha de la fila de los chips. Ajustes guardados con la sesión
+  (`anaPre`, `anaPost`, `anaSpeed`, `anaTilt` en el estado; por defecto Pre y Post encendidos,
+  Media, 0 dB/oct).
+- Prueba de humo: seno de 1 kHz a −12 dBFS marca −12,04 dB en Pre y Post, nada lejos del seno,
+  Pre = Post muestra a muestra con la EQ plana, campana +6 dB → Post − Pre = +6,00 dB, caída de
+  15 dB en medio segundo (Media), inclinación de 3 dB/oct (+3 dB a 2 kHz), con ruido Post − Pre =
+  −6,0 dB en la campana de 2,5 kHz y −12,9 dB a 40 Hz con HPF de 12 dB/oct en 80 Hz, ajustes en la
+  sesión, cabecera sin botones pisados a 1120 y 960 px. Capturas 12 y 13.
+- Versión del plugin 0.31.0; la web no cambia (ya tenía el analizador desde la v0.24).
+
 ## Pruebas en Ableton
 
 - **Nulo en render offline (27/11/2026, v0.30):** render de una pista con la curva (campanas,

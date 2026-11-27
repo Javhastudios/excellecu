@@ -190,6 +190,69 @@ MagChart::Geom MagChart::geom() const
 MagChart::MagChart (ui::BandModel& m, std::function<void()> cb) : model (m), onChange (std::move (cb))
 {
     setWantsKeyboardFocus (false);
+    const auto& st = model.proc.apvts.state;
+    analyzer.showPre = (bool) st.getProperty ("anaPre", true);
+    analyzer.showPost = (bool) st.getProperty ("anaPost", true);
+    analyzer.speed = jlimit (0, 2, (int) st.getProperty ("anaSpeed", 1));
+    analyzer.tilt = jlimit (0, 3, (int) st.getProperty ("anaTilt", 0));
+    startTimerHz (30);
+}
+
+void MagChart::setAnalyzer (bool pre, bool post, int speed, int tilt)
+{
+    analyzer.showPre = pre; analyzer.showPost = post;
+    analyzer.speed = jlimit (0, 2, speed); analyzer.tilt = jlimit (0, 3, tilt);
+    auto& st = model.proc.apvts.state;
+    st.setProperty ("anaPre", pre, nullptr);
+    st.setProperty ("anaPost", post, nullptr);
+    st.setProperty ("anaSpeed", analyzer.speed, nullptr);
+    st.setProperty ("anaTilt", analyzer.tilt, nullptr);
+    repaint();
+}
+
+void MagChart::timerCallback()
+{
+    const double now = Time::getMillisecondCounterHiRes() / 1000.0;
+    const double dt = lastTick > 0 ? std::min (0.2, now - lastTick) : 0.0;
+    lastTick = now;
+    const auto G = geom();
+    const int w = std::max (1, (int) std::round (G.pw));
+    const bool wasActive = analyzer.active;
+    const bool visible = analyzer.tick (model.proc, dt, w, [&G] (int x) { return G.fromX (G.l + (float) x); });
+    if (visible || wasActive) repaint();
+}
+
+void MagChart::paintAnalyzer (Graphics& g, const Geom& G) const
+{
+    if (! analyzer.active) return;
+    const float top = G.t, bottom = G.t + G.ph;
+    auto yFor = [&] (float db) {
+        return top + (float) jlimit (0.0, 1.0, (ui::Analyzer::TOP - db) / ui::Analyzer::RANGE) * G.ph;
+    };
+    auto path = [&] (const std::vector<float>& a) {
+        Path p;
+        p.startNewSubPath (G.l, bottom);
+        for (size_t x = 0; x < a.size(); ++x) p.lineTo (G.l + (float) x, yFor (a[x]));
+        p.lineTo (G.l + (float) a.size(), bottom);
+        p.closeSubPath();
+        return p;
+    };
+    g.saveState();
+    g.reduceClipRegion (Rectangle<float> (G.l, G.t, G.pw, G.ph).toNearestInt());
+    if (! analyzer.preDb.empty())
+    {
+        auto p = path (analyzer.preDb);
+        g.setColour (Colours::white.withAlpha (0.07f)); g.fillPath (p);
+        g.setColour (Colours::white.withAlpha (0.16f)); g.strokePath (p, PathStrokeType (0.8f));
+    }
+    if (! analyzer.postDb.empty())
+    {
+        auto p = path (analyzer.postDb);
+        const Colour green (0xff3ecfa3);
+        g.setColour (green.withAlpha (0.08f)); g.fillPath (p);
+        g.setColour (green.withAlpha (0.55f)); g.strokePath (p, PathStrokeType (1.0f));
+    }
+    g.restoreState();
 }
 
 // Puntos visibles: de las bandas no seleccionadas solo el juego editado; de la seleccionada
@@ -245,6 +308,7 @@ void MagChart::paint (Graphics& g)
         g.drawText ((db > 0 ? "+" : "") + String (db) + "dB", Rectangle<float> (0, y - 6, G.l - 3, 12), Justification::centredRight, false);
     }
     freqGrid (g, G.l, G.r, G.t, G.H - G.b, G.W);
+    paintAnalyzer (g, G);   // detrás de las curvas
     const float zY = G.toY (0);
 
     if (d.anyActive)

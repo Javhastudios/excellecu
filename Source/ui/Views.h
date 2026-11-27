@@ -1,6 +1,7 @@
 // Gráficas: magnitud con puntos editables (drawMag + drawHandles + eventos de la web) y fase.
 #pragma once
 
+#include "Analyzer.h"
 #include "BandModel.h"
 
 struct ChartData
@@ -21,10 +22,15 @@ struct ChartData
     void compute (const eq::Params& params, double sampleRate, int plotWidth);
 };
 
-class MagChart : public juce::Component
+class MagChart : public juce::Component, private juce::Timer
 {
 public:
     MagChart (ui::BandModel&, std::function<void()> onChange);
+    ~MagChart() override { stopTimer(); }
+
+    // Analizador (v0.31): ajustes guardados con la sesión
+    ui::Analyzer analyzer;
+    void setAnalyzer (bool pre, bool post, int speed, int tilt);
 
     void setData (const ChartData* d) { data = d; repaint(); }
     void paint (juce::Graphics&) override;
@@ -77,6 +83,9 @@ private:
     ui::BandModel& model;
     std::function<void()> onChange;
     const ChartData* data = nullptr;
+    void timerCallback() override;
+    void paintAnalyzer (juce::Graphics&, const Geom&) const;
+    double lastTick = 0;
     Hit hover;
     std::optional<Drag> drag;
     float wheelAccum = 0;
