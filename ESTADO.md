@@ -1,6 +1,6 @@
 # Estado del proyecto — Excellecu (EQ por DFT, bandas dinámicas)
 
-> Para retomar: "lee el ESTADO.md de excellecu". Actualizado: 26/11/2026.
+> Para retomar: "lee el ESTADO.md de excellecu". Actualizado: 27/11/2026.
 > Plan común de Javhastudios (venta, firma, web): ESTADO.md del proyecto de Claude
 > "Javhastudios Plugins". Antecesor: boboongecu (v0.4, borrado tras medirlo en Plugin Doctor).
 
@@ -84,6 +84,17 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
     (guardar, formato de la web, antiguos en TDM), punto nuevo en TDM, lectura de valores
     escritos, panel con las tres filas, tamaño mínimo sin botones pisados, escribir «2,5k» con
     doble clic. Capturas 10 (shelf Classic con Cénit y codo Suave) y 11 (tamaño mínimo).
+
+## Pruebas en Ableton
+
+- **Nulo en render offline (27/11/2026, v0.30):** render de una pista con la curva (campanas,
+  HPF 79,3 Hz a 48 dB/oct, high shelf) frente a la misma pista en tiempo real con la polaridad
+  invertida: anula (−85 dB de pico, espectro vacío). El export tiene que ir a la frecuencia de
+  muestreo de la sesión (o congelar y acoplar): con la sesión a 44,1 kHz y el export a 48 kHz
+  quedó un residuo de ~−53 dB entre 35 y 100 Hz. El filtro de 8193 muestras cambia un poco con
+  la frecuencia de muestreo en cortes empinados en graves (calculado: hasta 0,27 dB en el codo de
+  ese HPF, residuo de −44 a −53 dB entre 60 y 80 Hz). Argumento más para escalar el filtro con
+  la frecuencia de muestreo (pendiente).
 
 ## v0.25 (26/11/2026): bypass alineado, menos CPU, letra legible y analizador en la web
 
