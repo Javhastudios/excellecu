@@ -85,7 +85,7 @@ guarda como archivo; el HTML conserva además los motores Clásico, la ventana y
     escritos, panel con las tres filas, tamaño mínimo sin botones pisados, escribir «2,5k» con
     doble clic. Capturas 10 (shelf Classic con Cénit y codo Suave) y 11 (tamaño mínimo).
 
-## En la rama `trabajo` (sin compilar): v0.31, analizador en el plugin
+## v0.31 (27/11/2026): analizador en el plugin (compilada)
 
 - **Analizador de espectro** (el de la web v0.24): Pre (entrada, en gris) y Post (lo que suena,
   en verde) detrás de las curvas. FFT de 8192 con Hann, suma de 1/12 de octava por píxel
